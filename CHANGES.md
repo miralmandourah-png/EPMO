@@ -94,6 +94,18 @@ through (upload template → import IPI → import Milestones → Export),
 confirming the numbers land correctly and per-slide shape counts are
 unchanged.
 
+**Dynamic status coloring (this update)**: the deck states its own rule in
+plain text ("on-track ≥ 3.0", slides 4/6/12/17). Export now recomputes color
+from the live number instead of leaving whatever color the template shipped
+with — the sector status bubbles on the IPI-by-sector slide (and its
+duplicate) and the Enterprise IPI number both recolor green/amber/red as
+values change (≥3.0 on-track, ≥2.6 cautious, <2.6 at-risk — the same rule
+already used for the dashboard's IPI bars, so dashboard and export never
+disagree). Verified: boundary values (3.0, 2.6, 2.59) land in the correct
+bucket, and forcing a value into "at-risk" turns the actual bubble shape and
+number red end-to-end through the export route, with brand shape counts
+unchanged.
+
 **Not yet mapped**: the dense per-initiative deep-dive grids (Health/Motor/
 General/Life), the Strategy & Ambition 2026→2030 table, benefit-status-by-LoB
 and savings-breakdown tables, recovery tracker, scenarios — these are left

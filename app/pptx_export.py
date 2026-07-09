@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional
 
 from pptx import Presentation
 from pptx.util import Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 IN = 914400  # EMU per inch
 
@@ -123,6 +125,67 @@ def _value_right_of(slide, anchor, min_dx: float = 0.5, tol_top: float = 0.15):
 
 
 # --------------------------------------------------------------------------
+# Dynamic status coloring
+#
+# The threshold this deck states in its own text is "on-track ≥ 3.0" (slides
+# 4, 6, 12, 17). The amber/red split below that line (>=2.6 cautious, <2.6
+# at-risk) is the rule from the dashboard's own IPI bars, applied here too so
+# the exported deck and the live dashboard never disagree about what a given
+# number means. Colors match the template's own status palette (sampled from
+# its existing status bubbles), not an invented one.
+# --------------------------------------------------------------------------
+
+STATUS_COLORS = {"on_track": "2E9E7B", "cautious": "E0A52E", "at_risk": "C0392B"}
+
+
+def _ipi_status(value: float) -> str:
+    if value >= 3.0:
+        return "on_track"
+    if value >= 2.6:
+        return "cautious"
+    return "at_risk"
+
+
+def _set_shape_fill(shape, hex_color: str) -> None:
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = RGBColor.from_string(hex_color)
+
+
+def _set_run_font_color(shape, hex_color: str, run_index: int = 0, para_index: int = 0) -> None:
+    if not shape.has_text_frame:
+        return
+    paras = shape.text_frame.paragraphs
+    if para_index >= len(paras):
+        return
+    runs = paras[para_index].runs
+    if 0 <= run_index < len(runs):
+        runs[run_index].font.color.rgb = RGBColor.from_string(hex_color)
+
+
+def _find_status_bubble(slide, left_in: float, top_in: float, tol: float = 0.15):
+    """An AUTO_SHAPE near (left_in, top_in) whose current fill is one of the
+    deck's own status colors — i.e. the colored dot/bubble itself, not its
+    lighter background track shape."""
+    known = {c.upper() for c in STATUS_COLORS.values()}
+    best, best_d = None, tol
+    for sh in slide.shapes:
+        if sh.shape_type != MSO_SHAPE_TYPE.AUTO_SHAPE:
+            continue
+        try:
+            if sh.fill.type != 1 or str(sh.fill.fore_color.rgb).upper() not in known:
+                continue
+        except Exception:
+            continue
+        L, T = _left_top_in(sh)
+        if L is None:
+            continue
+        d = abs(L - left_in) + abs(T - top_in)
+        if d <= best_d:
+            best, best_d = sh, d
+    return best
+
+
+# --------------------------------------------------------------------------
 # Coordinate map (calibrated to the 36-slide Strategic Health Check deck)
 # --------------------------------------------------------------------------
 
@@ -201,7 +264,7 @@ def _apply_closing(slide, fields):
 def _apply_ipi_sector(slide, sector_rows):
     for sh in _text_boxes(slide):
         label = sh.text_frame.text.strip()
-        L, _ = _left_top_in(sh)
+        L, T = _left_top_in(sh)
         if L is None or L > 2.0:  # sector labels sit in the left column
             continue
         match = None
@@ -220,6 +283,17 @@ def _apply_ipi_sector(slide, sector_rows):
             val = _value_right_of(slide, sh, min_dx=1.0)
             if val is not None:
                 _set_box_text(val, match["ipi"])
+            # dynamic status bubble: on-track >=3.0 (this deck's own stated
+            # rule), cautious >=2.6, at-risk below -- recomputed from the
+            # live number rather than left at whatever the template shipped.
+            try:
+                ipi_val = float(match["ipi"])
+            except (TypeError, ValueError):
+                ipi_val = None
+            if ipi_val is not None:
+                bubble = _find_status_bubble(slide, 2.10, T, tol=0.15)
+                if bubble is not None:
+                    _set_shape_fill(bubble, STATUS_COLORS[_ipi_status(ipi_val)])
 
 
 # Executive Summary slide (not duplicated elsewhere in the deck).
@@ -263,10 +337,12 @@ def _apply_exec_summary(slide, fields: Dict[str, Any]) -> None:
     if ipi is not None:
         box = _find_exact(slide, *EXEC_POS["enterprise_ipi"])
         try:
-            if box:
-                _set_run_text(box, 0, f"{float(ipi):.2f}")
+            ipi_val = float(ipi)
         except (TypeError, ValueError):
-            pass
+            ipi_val = None
+        if box and ipi_val is not None:
+            _set_run_text(box, 0, f"{ipi_val:.2f}")
+            _set_run_font_color(box, STATUS_COLORS[_ipi_status(ipi_val)])
 
     sp = _get(fields, "exec.health.strategic_projects")
     mt = _get(fields, "exec.health.ms_total")
