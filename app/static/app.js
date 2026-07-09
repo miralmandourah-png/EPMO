@@ -258,8 +258,28 @@ document.getElementById("dataMenu").addEventListener("click", (e) => {
   else if (act === "importIpi") document.getElementById("fileIpi").click();
   else if (act === "importMilestones") askGraceThenImportMilestones();
   else if (act === "uploadPptx") document.getElementById("filePptx").click();
+  else if (act === "syncRecovery") runRecoverySync();
   else if (act === "reset") confirmReset();
 });
+
+async function runRecoverySync() {
+  try {
+    const res = await fetch("/api/recovery/sync", { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    state = data.state; renderTab(activeTab);
+    const s = data.summary;
+    const list = (arr) => arr.length ? el("ul", {}, arr.map((x) => el("li", {}, x))) : el("p", { class: "note" }, "None.");
+    showModal(el("div", {}, [
+      el("h3", {}, "Recovery Tracker synced"),
+      el("p", {}, `Scanned ${s.scanned} scored initiatives; ${s.flagged} have TI below ${s.threshold}.`),
+      el("p", { html: `<b>Added (${s.added.length}):</b>` }), list(s.added),
+      el("p", { html: `<b>Updated (${s.updated.length}):</b>` }), list(s.updated),
+      el("div", { class: "note" }, "Root cause, corrective action, and owner are left blank on new rows for you to fill in. Anything you already typed on existing rows is preserved."),
+      el("div", { class: "modal-actions" }, [el("button", { class: "btn primary", onclick: closeModal }, "Done")]),
+    ]));
+  } catch (e) { toast("Recovery sync failed: " + tryJson(e.message), "error"); }
+}
 
 document.getElementById("filePptx").addEventListener("change", async (e) => {
   const file = e.target.files[0]; e.target.value = "";

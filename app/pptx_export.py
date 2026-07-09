@@ -391,6 +391,117 @@ def _apply_exec_summary(slide, fields: Dict[str, Any]) -> None:
             _set_run_text(box, 0, v)
 
 
+# Recovery tracker table (identical row grid on the CEO slide and its
+# appendix duplicate). Calibrated to this deck: 10 physical rows starting at
+# T=1.590in, spaced exactly 0.503in apart.
+RECOVERY_SLIDES = [12, 35]
+RECOVERY_ROW0_T = 1.590
+RECOVERY_ROW_H = 0.503
+RECOVERY_MAX_ROWS = 10
+RECOVERY_COLS = {
+    "rank": 0.620,
+    "initiative": 0.940,       # 2 paragraphs: name / "{lob}  {type}"
+    "bri": 3.350,
+    "status": 4.220,           # text box + a status-colored bubble at the same spot
+    "ipi_ti": 5.160,           # 2 paragraphs: "IPI x.xx" / "TI x.xx"
+    "root_cause": 6.200,
+    "corrective_action": 8.740,
+    "owner": 11.500,           # 2 paragraphs: split on comma/newline
+}
+RECOVERY_STATUS_LABEL = {"Watch": "WATCH", "At-risk": "AT RISK"}
+RECOVERY_STATUS_KEY = {"Watch": "cautious", "At-risk": "at_risk"}
+
+
+def _set_two_paragraph(shape, line1: Optional[str], line2: Optional[str]) -> None:
+    if not shape.has_text_frame:
+        return
+    paras = shape.text_frame.paragraphs
+    if len(paras) >= 1 and line1 is not None:
+        _set_paragraph_text(paras[0], line1)
+    if len(paras) >= 2 and line2 is not None:
+        _set_paragraph_text(paras[1], line2)
+
+
+def _recovery_items(fields: Dict[str, Any], rows: Dict[str, int]) -> List[Dict[str, Any]]:
+    n = int(rows.get("recovery.row", 0) or 0)
+    items = []
+    for i in range(n):
+        p = f"recovery.row.{i}"
+        name = fields.get(f"{p}.initiative")
+        if not name:
+            continue
+        items.append({
+            "rank": fields.get(f"{p}.rank") or (i + 1),
+            "initiative": str(name),
+            "lob": fields.get(f"{p}.lob") or "",
+            "item_type": fields.get(f"{p}.item_type") or "",
+            "bri": fields.get(f"{p}.bri"),
+            "status": fields.get(f"{p}.status") or "Watch",
+            "ipi": fields.get(f"{p}.ipi"),
+            "ti": fields.get(f"{p}.ti"),
+            "root_cause": fields.get(f"{p}.root_cause"),
+            "corrective_action": fields.get(f"{p}.corrective_action"),
+            "owner": fields.get(f"{p}.owner"),
+        })
+    items.sort(key=lambda it: _num_or(it["rank"], 9999))
+    return items
+
+
+def _num_or(v: Any, default: float) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _apply_recovery_tracker(slide, items: List[Dict[str, Any]]) -> None:
+    for idx, item in enumerate(items[:RECOVERY_MAX_ROWS]):
+        row_t = RECOVERY_ROW0_T + idx * RECOVERY_ROW_H
+
+        box = _find_near(slide, RECOVERY_COLS["rank"], row_t, tol=0.2)
+        if box:
+            _set_box_text(box, str(int(_num_or(item["rank"], idx + 1))))
+
+        box = _find_near(slide, RECOVERY_COLS["initiative"], row_t, tol=0.2)
+        if box:
+            _set_two_paragraph(box, item["initiative"], f"{item['lob']}  {item['item_type']}".strip())
+
+        box = _find_near(slide, RECOVERY_COLS["bri"], row_t, tol=0.2)
+        if box and item["bri"] is not None and (v := _fmt_int(item["bri"])):
+            _set_box_text(box, v)
+
+        box = _find_near(slide, RECOVERY_COLS["ipi_ti"], row_t, tol=0.2)
+        if box:
+            ipi_v = _num_or(item["ipi"], None) if item["ipi"] not in (None, "") else None
+            ti_v = _num_or(item["ti"], None) if item["ti"] not in (None, "") else None
+            ipi_s = f"IPI {ipi_v:.2f}" if ipi_v is not None else "IPI n/a"
+            ti_s = f"TI {ti_v:.2f}" if ti_v is not None else "TI n/a"
+            _set_two_paragraph(box, ipi_s, ti_s)
+
+        box = _find_near(slide, RECOVERY_COLS["root_cause"], row_t, tol=0.2)
+        if box and item["root_cause"]:
+            _set_box_text(box, item["root_cause"])
+
+        box = _find_near(slide, RECOVERY_COLS["corrective_action"], row_t, tol=0.2)
+        if box and item["corrective_action"]:
+            _set_box_text(box, item["corrective_action"])
+
+        box = _find_near(slide, RECOVERY_COLS["owner"], row_t, tol=0.2)
+        if box and item["owner"]:
+            parts = re.split(r",|\n", str(item["owner"]), maxsplit=1)
+            l1 = parts[0].strip()
+            l2 = parts[1].strip() if len(parts) > 1 else ""
+            _set_two_paragraph(box, l1, l2)
+
+        status = item["status"] if item["status"] in RECOVERY_STATUS_LABEL else "Watch"
+        box = _find_near(slide, RECOVERY_COLS["status"], row_t, tol=0.25)
+        if box:
+            _set_box_text(box, RECOVERY_STATUS_LABEL[status])
+        bubble = _find_status_bubble(slide, RECOVERY_COLS["status"], row_t, tol=0.25)
+        if bubble:
+            _set_shape_fill(bubble, STATUS_COLORS[RECOVERY_STATUS_KEY[status]])
+
+
 def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
     """Return a new .pptx (bytes) = template with mapped values substituted."""
     fields = state.get("fields", {})
@@ -414,6 +525,11 @@ def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
     for idx in EXEC_SUMMARY_SLIDES:
         if idx <= n:
             _apply_exec_summary(prs.slides[idx - 1], fields)
+    recovery_items = _recovery_items(fields, rows)
+    if recovery_items:
+        for idx in RECOVERY_SLIDES:
+            if idx <= n:
+                _apply_recovery_tracker(prs.slides[idx - 1], recovery_items)
 
     buf = io.BytesIO()
     prs.save(buf)

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import schema, store, excel_io, pptx_export
+from . import schema, store, excel_io, pptx_export, automation
 
 app = FastAPI(title="Strategic Health Check Platform", docs_url=None, redoc_url=None)
 
@@ -82,6 +82,16 @@ async def import_template(file: UploadFile = File(...)):
         state.setdefault("rows", {})[tid] = max(state.get("rows", {}).get(tid, 0), count)
     store.save_state(state)
     return {"state": state, "applied": len(updates)}
+
+
+# ---- recovery tracker auto-sync ------------------------------------------
+
+@app.post("/api/recovery/sync")
+def sync_recovery(threshold: Optional[float] = None):
+    state = store.load_state()
+    summary = automation.sync_recovery_tracker(state, threshold=threshold)
+    store.save_state(state)
+    return {"state": state, "summary": summary}
 
 
 # ---- smart importers -----------------------------------------------------

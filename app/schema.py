@@ -25,6 +25,7 @@ from typing import Any, Dict, List
 
 STATUS_6 = ["On-track", "Cautious", "Critical", "At-risk", "Not scored", "Overachieved"]
 WATCH_2 = ["Watch", "At-risk"]
+TYPE_2 = ["growth", "savings"]
 
 LOBS = [
     ("health", "Health"),
@@ -67,6 +68,7 @@ def _lob_deepdive(lob_id: str, lob_label: str) -> Dict[str, Any]:
             {"type": "table", "title": "Initiatives", "id": f"{lob_id}.init", "maxRows": 12, "columns": [
                 _col("name", "Initiative"),
                 _col("note", "Note"),
+                _col("item_type", "Type", "select", options=TYPE_2),
                 _col("ipi", "IPI", "number"),
                 _col("ti", "TI", "number"),
                 _col("bri_committed", "BRI committed (SAR m)", "number"),
@@ -251,13 +253,18 @@ def _build_sections() -> List[Dict[str, Any]]:
 
     # 11. EPMO Recovery Tracker --------------------------------------------
     sections.append({"id": "recovery", "label": "EPMO Recovery Tracker", "blocks": [
+        {"type": "fields", "title": "Auto-flag", "fields": [
+            _f("recovery.config.ti_threshold", "Flag initiatives with TI below", "number"),
+        ]},
         {"type": "table", "title": "Recovery tracker", "id": "recovery.row", "maxRows": 20, "columns": [
             _col("rank", "#", "number"),
             _col("initiative", "Initiative"),
-            _col("lob_type", "LoB / type"),
+            _col("lob", "LoB", "select", options=[lbl for _, lbl in LOBS] + ["CX", "HR"]),
+            _col("item_type", "Type", "select", options=TYPE_2),
             _col("bri", "BRI (SAR m)", "number"),
             _col("status", "Status", "select", options=WATCH_2),
-            _col("ipi_ti", "IPI / TI"),
+            _col("ipi", "IPI", "number"),
+            _col("ti", "TI", "number"),
             _col("root_cause", "Root cause"),
             _col("corrective_action", "Corrective action"),
             _col("owner", "Owner + check-in"),

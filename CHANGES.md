@@ -61,7 +61,43 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 2 — In-place branded PPTX export (this release)
+## Phase 3 — EPMO Recovery Tracker auto-flagging (this release)
+
+Per user instruction: "projects with low TI ... should be shown in the EPMO
+recovery tracker" so they can chase root cause / corrective action with the
+responsible department. Threshold agreed with the user: **TI < 3.0**,
+matching the deck's own "TI (vs 3.0)" labeling.
+
+**Added**
+- `automation.py` — `sync_recovery_tracker`: scans every LoB's initiatives
+  table for TI below the threshold and upserts a matching row into the
+  recovery tracker, matched by (LoB, initiative). New rows get root cause /
+  corrective action / owner left **blank**; existing rows get BRI/IPI/TI
+  refreshed without touching anything already typed into those blank fields.
+  Nothing is ever auto-removed (if an item recovers, its row is left for the
+  user to delete once resolved). Rows are re-ranked by BRI size descending on
+  every sync, matching the deck's own "largest ... by size" ordering.
+- Runs only when the user clicks **Sync Recovery Tracker** (Data ▾) — not on
+  every autosave — so deleting a flagged row doesn't have it silently
+  reappear on the next keystroke.
+- Schema change: added a `Type` (growth/savings) column to each LoB's
+  initiatives table, and split the recovery tracker's `lob_type`/`ipi_ti`
+  combined text columns into structured `lob`/`item_type`/`ipi`/`ti` fields
+  so the sync engine can match and update rows reliably (the combined
+  "Health\ngrowth" / "IPI 2.21\nTI 1.72" display is now composed only at
+  export time).
+- Export mapping for the recovery tracker slide (and its appendix duplicate):
+  10-row grid calibrated to this deck, including the colored status bubble
+  (Watch=amber, At-risk=red) recolored dynamically from the row's own status.
+
+**Verified**: end-to-end through the real HTTP API and a live browser click-
+through (seed an initiative → Sync Recovery Tracker → summary modal → row
+appears on the Recovery Tracker tab with correct dropdowns); re-sync
+preserves manually-entered root cause; BRI-descending re-ranking confirmed;
+export writes correct text/colors to both the CEO slide and its appendix
+duplicate with brand shape counts unchanged.
+
+## Phase 2 — In-place branded PPTX export
 
 **Added** — `app/pptx_export.py` plus template routes (`POST
 /api/template/pptx`, `GET /api/template/pptx/info`, real `POST
