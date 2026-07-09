@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck Builder</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Deck Builder</div>
+  <div class="actions">
+    <input id="fileInput" type="file" accept=".xlsx,.xlsm" hidden>
+    <button id="btnUpload" class="btn">Upload Excel</button>
+    <button id="btnTemplate" class="btn ghost">Blank Template</button>
+    <button id="btnSample" class="btn ghost">Sample Template</button>
+    <button id="btnExportXlsx" class="btn ghost">Save as Excel</button>
+    <button id="btnExportPptx" class="btn primary">Export PPTX</button>
+  </div>
+</header>
+
+<div class="confidentiality">
+  Everything you upload or edit stays in this browser tab and is processed only in memory for the
+  duration of each request — nothing is saved on the server.
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<main class="layout">
+  <nav id="tabNav" class="tabnav"></nav>
+  <section id="panel" class="panel"></section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
