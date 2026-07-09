@@ -258,9 +258,27 @@ document.getElementById("dataMenu").addEventListener("click", (e) => {
   else if (act === "importIpi") document.getElementById("fileIpi").click();
   else if (act === "importMilestones") askGraceThenImportMilestones();
   else if (act === "uploadPptx") document.getElementById("filePptx").click();
+  else if (act === "importConstants") runImportConstants();
   else if (act === "syncRecovery") runRecoverySync();
   else if (act === "reset") confirmReset();
 });
+
+async function runImportConstants() {
+  try {
+    const res = await fetch("/api/import/constants", { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    state = data.state; renderTab(activeTab);
+    const nScalars = Object.keys(data.updates).length;
+    const nTableRows = Object.values(data.tables).reduce((a, rows) => a + rows.length, 0);
+    showModal(el("div", {}, [
+      el("h3", {}, "Targets extracted from template"),
+      el("p", {}, `Pulled ${nScalars} target figures and ${nTableRows} table rows (committed BRI, strategy ambition, benefit-by-LoB targets, savings breakdown, GWP by year/LoB) straight from your slides.`),
+      el("div", { class: "note" }, "Only target/committed numbers were touched — current-status numbers (actuals, IPI/TI, % on track) are untouched and still come from your monthly imports or manual entry."),
+      el("div", { class: "modal-actions" }, [el("button", { class: "btn primary", onclick: closeModal }, "Done")]),
+    ]));
+  } catch (e) { toast("Extract targets failed: " + tryJson(e.message), "error"); }
+}
 
 async function runRecoverySync() {
   try {

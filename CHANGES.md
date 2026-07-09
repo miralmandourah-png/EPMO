@@ -61,7 +61,42 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 3 — EPMO Recovery Tracker auto-flagging (this release)
+## Phase 4 — Extract committed/target constants from the template (this release)
+
+Per user instruction: "any number that mentions benefits or BRI meaning if
+it's a target is a constant ... write them for me in the platform (source
+them from the slides)". Committed/target figures are stable for the year and
+unlikely to change monthly, unlike status numbers (actuals, IPI/TI, % on
+track) which stay driven by manual entry or the other importers.
+
+**Added**
+- `pptx_constants.py` — the read-direction mirror of the export mapping:
+  extracts committed BRI, committed savings, the Strategy & Ambition
+  2026→2030 table (GWP/profit/ROE/initiative-share), committed BRI by line
+  of business, the savings breakdown, and GWP by year/by-LoB directly from
+  the uploaded template's own slides (Executive Summary + Context).
+- New **Extract targets from template** action (Data ▾), reusing whichever
+  PPTX template is already configured -- no separate upload needed.
+- Coordinate-anchoring bug fixed along the way: python-pptx returns a new
+  wrapper object each time you iterate `slide.shapes`, so comparing shapes
+  with `is` across two separate iterations never actually excludes anything.
+  Switched to comparing the underlying XML element (`sh._element is
+  other._element`), and added horizontal region bounds so a same-row lookup
+  can't wander into an unrelated panel on the other side of the slide at a
+  coincidentally similar height.
+
+**Verified**: every extracted value checked field-by-field against the
+source deck (committed BRI 2,961; savings 177; all 8 ambition figures;
+benefit-by-LoB 1,726/599/503/133; GWP by year and by LoB, cross-checked
+arithmetically against each row's own displayed total) -- all exact matches,
+through the full HTTP API and a live browser run (upload template → Extract
+targets → dashboard fields populated correctly, zero console errors).
+
+**Known simplification**: the savings-breakdown "AI 8-12" range is stored as
+its first number (8); a true range isn't representable in a single numeric
+field.
+
+## Phase 3 — EPMO Recovery Tracker auto-flagging
 
 Per user instruction: "projects with low TI ... should be shown in the EPMO
 recovery tracker" so they can chase root cause / corrective action with the

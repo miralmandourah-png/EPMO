@@ -14,7 +14,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import schema, store, excel_io, pptx_export, automation
+from . import schema, store, excel_io, pptx_export, automation, pptx_constants
 
 app = FastAPI(title="Strategic Health Check Platform", docs_url=None, redoc_url=None)
 
@@ -82,6 +82,39 @@ async def import_template(file: UploadFile = File(...)):
         state.setdefault("rows", {})[tid] = max(state.get("rows", {}).get(tid, 0), count)
     store.save_state(state)
     return {"state": state, "applied": len(updates)}
+
+
+# ---- extract committed/target constants from the uploaded template ------
+
+@app.post("/api/import/constants")
+def import_constants():
+    raw = store.load_template()
+    if raw is None:
+        raise HTTPException(400, "Upload a PPTX template first (Data ▾ → Upload PPTX template).")
+    try:
+        result = pptx_constants.extract_constants(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Could not read targets from template: {exc}") from exc
+
+    state = store.load_state()
+    fields = state.setdefault("fields", {})
+    rows = state.setdefault("rows", {})
+
+    for k, v in result["updates"].items():
+        if v is not None:
+            fields[k] = v
+    for table_id, table_rows in result["tables"].items():
+        cols = schema.table_by_id()[table_id]["columns"]
+        col_names = [c["name"] for c in cols if not c.get("computed")]
+        for i, row in enumerate(table_rows):
+            for name in col_names:
+                v = row.get(name)
+                if v is not None:
+                    fields[f"{table_id}.{i}.{name}"] = v
+        rows[table_id] = max(rows.get(table_id, 0), len(table_rows))
+
+    store.save_state(state)
+    return {"state": state, "updates": result["updates"], "tables": result["tables"]}
 
 
 # ---- recovery tracker auto-sync ------------------------------------------

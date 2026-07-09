@@ -114,7 +114,7 @@ def _value_right_of(slide, anchor, min_dx: float = 0.5, tol_top: float = 0.15):
         return None
     best, best_dx = None, 99.0
     for sh in _text_boxes(slide):
-        if sh is anchor:
+        if sh._element is anchor._element:
             continue
         L, T = _left_top_in(sh)
         if L is None:
