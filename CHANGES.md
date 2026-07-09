@@ -61,7 +61,53 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 4 — Extract committed/target constants from the template (this release)
+## Phase 5 — Map the LoB deep-dive tables, CX, and HR (this release)
+
+Per the user's request to map everything, plus "the initiative names and
+project names ... populate them from the presentation into the platform,
+they will be the same for now" (i.e. treat names as constant identifiers,
+same principle as Phase 4).
+
+**Added**
+- Export mapping for all four LoB initiative tables (Health/Motor/General/
+  Life) and their "projects under each initiative" tables, plus CX projects
+  and the HR slide. Column X-positions are identical across every LoB;
+  initiative-table row heights are calibrated per LoB (Health 0.337in,
+  Motor/Life 0.345in, General 0.255in for its 8 rows) and project-table rows
+  use an explicit per-LoB Y-position list (project counts per initiative are
+  irregular, so no formula fits).
+- Discovered the deck actually uses **two different status vocabularies**:
+  the recovery tracker's Watch(amber)/At-risk(red), already shipped
+  correctly, and a separate **6-value initiative status** (On-track/
+  Cautious/Critical/At-risk/Not scored/Overachieved) with its own distinct
+  colors read directly from the deck's own legend swatches (On-track green,
+  Cautious amber, Critical red, **At-risk orange** `#E8833A` -- distinct from
+  Critical's red, Not scored grey, Overachieved blue). Initiative status dots
+  now recolor dynamically from this palette.
+- Extended `pptx_constants.py` (same principle as Phase 4) to also read
+  initiative name/note/committed-BRI and project names straight from the
+  template, reusing the exact same coordinate config as the export so read
+  and write can never drift apart.
+- Fixed a formatting bug found while verifying the round-trip: BRI values
+  were losing their thousands separator on export (e.g. "1,066" became
+  "1066"); `_fmt_int` now matches the deck's own number style everywhere
+  it's used.
+
+**Verified**: synthetic non-confidential test data written to every LoB's
+initiative/project rows and read back correctly on both the Health slide and
+its appendix duplicate, status-dot recoloring across all six values,
+brand shape counts unchanged across the full 36-slide deck. Then the real
+round-trip: Extract targets from template → dashboard's Health tab shows
+"Corporate KAM" / committed BRI 576 with IPI/TI/actual left blank → Export →
+slide 8 shows "SME acquisition" and "1,066" -- all confirmed through a live
+browser run with zero console errors.
+
+**Not yet mapped**: CX's NPS-by-LoB and NPS-by-segment slides, and the
+Executive Summary's execution-tier bars / benefit-status bubbles (those are
+live status breakdowns, not names, so lower priority per the user's own
+constant-vs-status distinction).
+
+## Phase 4 — Extract committed/target constants from the template
 
 Per user instruction: "any number that mentions benefits or BRI meaning if
 it's a target is a constant ... write them for me in the platform (source

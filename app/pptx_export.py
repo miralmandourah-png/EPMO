@@ -313,7 +313,7 @@ EXEC_POS = {
 
 def _fmt_int(v: Any) -> Optional[str]:
     try:
-        return str(int(round(float(v))))
+        return f"{int(round(float(v))):,}"
     except (TypeError, ValueError):
         return None
 
@@ -502,6 +502,247 @@ def _apply_recovery_tracker(slide, items: List[Dict[str, Any]]) -> None:
             _set_shape_fill(bubble, STATUS_COLORS[RECOVERY_STATUS_KEY[status]])
 
 
+# --------------------------------------------------------------------------
+# Line-of-business deep-dive tables (Health/Motor/General/Life initiatives +
+# their "projects under each initiative" tables, plus CX and HR).
+#
+# Column X-positions are identical across every LoB (same template layout);
+# only row Y-positions differ per LoB (initiative/project counts vary), so
+# each LoB gets its own calibrated row list/grid, calibrated to this deck.
+# --------------------------------------------------------------------------
+
+STATUS_6_COLORS = {
+    "On-track": "2E9E7B", "Cautious": "E0A52E", "Critical": "C0392B",
+    "At-risk": "E8833A", "Not scored": "8A889E", "Overachieved": "2D9CDB",
+}
+
+# (left_min, left_max) column bands shared by every LoB's initiative table.
+INIT_COLS = {
+    "ipi": (4.0, 4.7),
+    "ti": (5.7, 6.3),
+    "bri_committed": (6.4, 8.6),
+    "realization_date": (8.65, 9.9),
+    "bri_actual": (10.85, 11.45),
+    "status_dot": (12.25, 12.7),
+}
+NAME_COL_L = 0.620
+
+# Project-table columns are identical across every LoB.
+PROJ_NAME_L = 0.860
+PROJ_IPI_L = 4.840
+PROJ_TI_L = 6.440
+PROJ_COMMENT_L = 7.100
+
+LOB_INIT_CONFIG = {
+    "health": {"slides": [8, 20], "row0_t": 1.760, "row_h": 0.337, "n_rows": 6},
+    "motor": {"slides": [22], "row0_t": 1.760, "row_h": 0.345, "n_rows": 6},
+    "general": {"slides": [24], "row0_t": 1.760, "row_h": 0.255, "n_rows": 8},
+    "life": {"slides": [26], "row0_t": 1.760, "row_h": 0.345, "n_rows": 5},
+}
+
+# Project row Y-positions: irregular (depends on how many projects sit under
+# each initiative), so calibrated as an explicit ordered list per LoB rather
+# than a formula. Order matches the deck's own visual top-to-bottom order.
+LOB_PROJ_CONFIG = {
+    "health": {"slides": [9, 21], "row_ts": [1.842, 2.497, 2.830, 3.485, 3.819, 4.153, 4.808, 5.142, 5.797, 6.452]},
+    "motor": {"slides": [23], "row_ts": [1.863, 2.225, 2.935, 3.297, 4.007, 4.717, 5.428, 5.789]},
+    "general": {"slides": [25], "row_ts": [1.813, 2.396, 2.694, 2.991, 3.574, 4.158, 4.741, 5.325, 5.908, 6.492]},
+    "life": {"slides": [27], "row_ts": [1.863, 2.574, 3.284, 3.994, 4.704]},
+}
+
+
+def _find_in_band(slide, row_t: float, l_min: float, l_max: float, tol_t: float = 0.15,
+                    require_shape: bool = False):
+    """First shape whose row is near row_t and whose left falls in [l_min, l_max].
+    require_shape=True restricts to AUTO_SHAPE (used for status dots)."""
+    for sh in slide.shapes:
+        if require_shape and sh.shape_type != MSO_SHAPE_TYPE.AUTO_SHAPE:
+            continue
+        if not require_shape and not (sh.has_text_frame and sh.text_frame.text.strip()):
+            continue
+        L, T = _left_top_in(sh)
+        if L is None or abs(T - row_t) > tol_t:
+            continue
+        if l_min <= L <= l_max:
+            return sh
+    return None
+
+
+def _apply_lob_initiatives(slide, lob_id: str, fields: Dict[str, Any], rows: Dict[str, int]) -> None:
+    cfg = LOB_INIT_CONFIG[lob_id]
+    table_id = f"{lob_id}.init"
+    n = min(int(rows.get(table_id, 0) or 0), cfg["n_rows"])
+    for i in range(n):
+        row_t = cfg["row0_t"] + i * cfg["row_h"]
+        p = f"{table_id}.{i}"
+
+        name = fields.get(f"{p}.name")
+        if name:
+            box = _find_near(slide, NAME_COL_L, row_t, tol=0.05)
+            if box:
+                _set_two_paragraph(box, str(name), fields.get(f"{p}.note") or "")
+
+        ipi = fields.get(f"{p}.ipi")
+        if ipi not in (None, ""):
+            box = _find_in_band(slide, row_t, *INIT_COLS["ipi"])
+            if box:
+                try:
+                    _set_box_text(box, f"{float(ipi):.2f}")
+                except (TypeError, ValueError):
+                    pass
+
+        ti = fields.get(f"{p}.ti")
+        if ti not in (None, ""):
+            box = _find_in_band(slide, row_t, *INIT_COLS["ti"])
+            if box:
+                try:
+                    _set_box_text(box, f"{float(ti):.2f}")
+                except (TypeError, ValueError):
+                    pass
+
+        bri_c = fields.get(f"{p}.bri_committed")
+        if bri_c not in (None, ""):
+            box = _find_in_band(slide, row_t, *INIT_COLS["bri_committed"])
+            if box and (v := _fmt_int(bri_c)):
+                _set_box_text(box, v)
+
+        realization = fields.get(f"{p}.realization_date")
+        if realization:
+            box = _find_in_band(slide, row_t, *INIT_COLS["realization_date"])
+            if box:
+                _set_box_text(box, str(realization))
+
+        bri_a = fields.get(f"{p}.bri_actual")
+        if bri_a not in (None, ""):
+            box = _find_in_band(slide, row_t, *INIT_COLS["bri_actual"])
+            if box and (v := _fmt_int(bri_a)):
+                _set_box_text(box, v)
+
+        status = fields.get(f"{p}.status")
+        if status in STATUS_6_COLORS:
+            dot = _find_in_band(slide, row_t, *INIT_COLS["status_dot"], require_shape=True)
+            if dot:
+                _set_shape_fill(dot, STATUS_6_COLORS[status])
+
+
+def _apply_lob_projects(slide, lob_id: str, fields: Dict[str, Any], rows: Dict[str, int]) -> None:
+    cfg = LOB_PROJ_CONFIG[lob_id]
+    table_id = f"{lob_id}.proj"
+    row_ts = cfg["row_ts"]
+    n = min(int(rows.get(table_id, 0) or 0), len(row_ts))
+    for i in range(n):
+        row_t = row_ts[i]
+        p = f"{table_id}.{i}"
+
+        project = fields.get(f"{p}.project")
+        if project:
+            box = _find_near(slide, PROJ_NAME_L, row_t, tol=0.05)
+            if box:
+                _set_box_text(box, str(project))
+
+        ipi = fields.get(f"{p}.ipi")
+        if ipi not in (None, ""):
+            box = _find_near(slide, PROJ_IPI_L, row_t, tol=0.1)
+            if box:
+                try:
+                    _set_box_text(box, f"{float(ipi):.2f}")
+                except (TypeError, ValueError):
+                    pass
+
+        ti = fields.get(f"{p}.ti")
+        if ti not in (None, ""):
+            box = _find_near(slide, PROJ_TI_L, row_t, tol=0.1)
+            if box:
+                try:
+                    _set_box_text(box, f"{float(ti):.2f}")
+                except (TypeError, ValueError):
+                    pass
+
+        comment = fields.get(f"{p}.comment")
+        if comment:
+            box = _find_near(slide, PROJ_COMMENT_L, row_t, tol=0.1)
+            if box:
+                _set_box_text(box, str(comment))
+
+
+# CX projects table (identical row grid on the CEO slide and its appendix
+# duplicate) and the single-initiative HR slide.
+CX_PROJ_SLIDES = [10, 28]
+CX_PROJ_ROW_TS = [3.963, 4.285]
+
+HR_SLIDE = 31
+HR_INIT_POS = (0.620, 2.260)   # 2-paragraph: note only (name is fixed "Operating-model redesign")
+HR_INIT_IPI_L = 4.350
+HR_INIT_TI_L = 6.050
+HR_PROJ_ROW_T = 4.046
+HR_PROJ_NAME_L = 0.896
+HR_PROJ_COMMENT_L = 7.220
+
+
+def _apply_cx_projects(slide, fields: Dict[str, Any], rows: Dict[str, int]) -> None:
+    n = min(int(rows.get("cx.proj", 0) or 0), len(CX_PROJ_ROW_TS))
+    for i in range(n):
+        row_t = CX_PROJ_ROW_TS[i]
+        p = f"cx.proj.{i}"
+        name = fields.get(f"{p}.name")
+        if name:
+            box = _find_near(slide, PROJ_NAME_L, row_t, tol=0.05)
+            if box:
+                _set_box_text(box, str(name))
+        ipi = fields.get(f"{p}.ipi")
+        if ipi not in (None, ""):
+            box = _find_near(slide, PROJ_IPI_L, row_t, tol=0.1)
+            if box:
+                try:
+                    _set_box_text(box, f"{float(ipi):.2f}")
+                except (TypeError, ValueError):
+                    pass
+        ti = fields.get(f"{p}.ti")
+        if ti not in (None, ""):
+            box = _find_near(slide, PROJ_TI_L, row_t, tol=0.1)
+            if box:
+                try:
+                    _set_box_text(box, f"{float(ti):.2f}")
+                except (TypeError, ValueError):
+                    pass
+
+
+def _apply_hr(slide, fields: Dict[str, Any]) -> None:
+    note = fields.get("hr.init.note")
+    if note:
+        box = _find_near(slide, *HR_INIT_POS, tol=0.05)
+        if box:
+            paras = box.text_frame.paragraphs
+            if len(paras) >= 2:
+                _set_paragraph_text(paras[1], str(note))
+    ipi = fields.get("hr.init.ipi")
+    if ipi not in (None, ""):
+        box = _find_near(slide, HR_INIT_IPI_L, HR_INIT_POS[1], tol=0.1)
+        if box:
+            try:
+                _set_box_text(box, f"{float(ipi):.2f}")
+            except (TypeError, ValueError):
+                pass
+    ti = fields.get("hr.init.ti")
+    if ti not in (None, ""):
+        box = _find_near(slide, HR_INIT_TI_L, HR_INIT_POS[1], tol=0.1)
+        if box:
+            try:
+                _set_box_text(box, f"{float(ti):.2f}")
+            except (TypeError, ValueError):
+                pass
+    project = fields.get("hr.proj.0.project")
+    if project:
+        box = _find_near(slide, HR_PROJ_NAME_L, HR_PROJ_ROW_T, tol=0.05)
+        if box:
+            _set_box_text(box, str(project))
+    comment = fields.get("hr.proj.0.comment")
+    if comment:
+        box = _find_near(slide, HR_PROJ_COMMENT_L, HR_PROJ_ROW_T, tol=0.15)
+        if box:
+            _set_box_text(box, str(comment))
+
+
 def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
     """Return a new .pptx (bytes) = template with mapped values substituted."""
     fields = state.get("fields", {})
@@ -530,6 +771,20 @@ def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
         for idx in RECOVERY_SLIDES:
             if idx <= n:
                 _apply_recovery_tracker(prs.slides[idx - 1], recovery_items)
+
+    for lob_id, cfg in LOB_INIT_CONFIG.items():
+        for idx in cfg["slides"]:
+            if idx <= n:
+                _apply_lob_initiatives(prs.slides[idx - 1], lob_id, fields, rows)
+    for lob_id, cfg in LOB_PROJ_CONFIG.items():
+        for idx in cfg["slides"]:
+            if idx <= n:
+                _apply_lob_projects(prs.slides[idx - 1], lob_id, fields, rows)
+    for idx in CX_PROJ_SLIDES:
+        if idx <= n:
+            _apply_cx_projects(prs.slides[idx - 1], fields, rows)
+    if HR_SLIDE <= n:
+        _apply_hr(prs.slides[HR_SLIDE - 1], fields)
 
     buf = io.BytesIO()
     prs.save(buf)

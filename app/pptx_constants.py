@@ -20,7 +20,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pptx import Presentation
 
-from .pptx_export import _text_boxes, _left_top_in, _find_near, EXEC_POS
+from .pptx_export import (
+    _text_boxes, _left_top_in, _find_near, _find_in_band, _fmt_int, EXEC_POS,
+    LOB_INIT_CONFIG, LOB_PROJ_CONFIG, INIT_COLS, NAME_COL_L, PROJ_NAME_L,
+    CX_PROJ_SLIDES, CX_PROJ_ROW_TS, PROJ_IPI_L, PROJ_TI_L,
+)
 
 EXEC_SUMMARY_SLIDE = 4
 CONTEXT_SLIDE = 5
@@ -157,6 +161,66 @@ def _extract_gwp_by_lob(slide) -> List[Dict[str, Any]]:
     return rows
 
 
+def _extract_lob_initiatives(prs) -> Dict[str, List[Dict[str, Any]]]:
+    """Initiative name/note/committed-BRI are constant identifiers -- IPI,
+    TI, BRI actual, status, and realization date are monthly and left alone."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for lob_id, cfg in LOB_INIT_CONFIG.items():
+        slide_idx = cfg["slides"][0]
+        if slide_idx > len(prs.slides):
+            continue
+        slide = prs.slides[slide_idx - 1]
+        entries = []
+        for i in range(cfg["n_rows"]):
+            row_t = cfg["row0_t"] + i * cfg["row_h"]
+            box = _find_near(slide, NAME_COL_L, row_t, tol=0.05)
+            name = note = None
+            if box:
+                paras = box.text_frame.paragraphs
+                if len(paras) >= 1:
+                    name = paras[0].text.strip()
+                if len(paras) >= 2:
+                    note = paras[1].text.strip()
+            if not name:
+                continue
+            bri_box = _find_in_band(slide, row_t, *INIT_COLS["bri_committed"])
+            bri = _num(bri_box.text_frame.text) if bri_box else None
+            entries.append({"name": name, "note": note or "", "bri_committed": bri})
+        out[lob_id] = entries
+    return out
+
+
+def _extract_lob_projects(prs) -> Dict[str, List[Dict[str, Any]]]:
+    """Project name is a constant identifier -- IPI/TI/comment are monthly."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for lob_id, cfg in LOB_PROJ_CONFIG.items():
+        slide_idx = cfg["slides"][0]
+        if slide_idx > len(prs.slides):
+            continue
+        slide = prs.slides[slide_idx - 1]
+        entries = []
+        for row_t in cfg["row_ts"]:
+            box = _find_near(slide, PROJ_NAME_L, row_t, tol=0.05)
+            name = box.text_frame.text.strip() if box else ""
+            if name:
+                entries.append({"project": name})
+        out[lob_id] = entries
+    return out
+
+
+def _extract_cx_projects(prs) -> List[Dict[str, Any]]:
+    if not CX_PROJ_SLIDES or CX_PROJ_SLIDES[0] > len(prs.slides):
+        return []
+    slide = prs.slides[CX_PROJ_SLIDES[0] - 1]
+    entries = []
+    for row_t in CX_PROJ_ROW_TS:
+        box = _find_near(slide, PROJ_NAME_L, row_t, tol=0.05)
+        name = box.text_frame.text.strip() if box else ""
+        if name:
+            entries.append({"name": name})
+    return entries
+
+
 def extract_constants(template_bytes: bytes) -> Dict[str, Any]:
     """Returns {"updates": {...scalars...}, "tables": {tableId: [rows]}}."""
     prs = Presentation(__import__("io").BytesIO(template_bytes))
@@ -187,5 +251,13 @@ def extract_constants(template_bytes: bytes) -> Dict[str, Any]:
         s5 = prs.slides[CONTEXT_SLIDE - 1]
         tables["ctx.gwp_year"] = _extract_gwp_years(s5)
         tables["ctx.gwp_lob"] = _extract_gwp_by_lob(s5)
+
+    for lob_id, entries in _extract_lob_initiatives(prs).items():
+        tables[f"{lob_id}.init"] = entries
+    for lob_id, entries in _extract_lob_projects(prs).items():
+        tables[f"{lob_id}.proj"] = entries
+    cx_entries = _extract_cx_projects(prs)
+    if cx_entries:
+        tables["cx.proj"] = cx_entries
 
     return {"updates": updates, "tables": tables}
