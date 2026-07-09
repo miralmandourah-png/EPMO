@@ -1,357 +1,397 @@
-// Deck Builder frontend: holds the whole deck in memory (`deck`), renders
-// editable tabs from a small config, and talks to /api/* for upload/export.
-// Nothing here persists to localStorage/cookies -- state lives only in
-// this tab's JS memory and is discarded on reload.
+// Strategic Health Check Platform — frontend.
+//
+// Loads the schema + saved state from the local backend, renders 14 editable
+// tabs, autosaves every change to the local JSON store, and drives the Excel
+// import/export flows. All state lives on this machine; nothing is sent to any
+// third party.
 
-function emptyDeck() {
-  return {
-    cover: { title: "", subtitle: "", date_label: "", footer: "" },
-    toc: [],
-    exec_summary: {
-      headline: "", subheadline: "", committed_label: "", committed_bri_m: 0, savings_total_m: 0,
-      ipi_tiers: [], benefit_status_by_lob: [], savings_breakdown: [],
-    },
-    context_gwp: { headline: "", subheadline: "", years: [], by_lob: [], by_lob_year_label: "" },
-    ipi_sector: { headline: "", subheadline: "", read_note: "", items: [] },
-    lob_overview: { headline: "", narrative: "", rows: [] },
-    initiatives: [],
-    projects: [],
-    nps_summary: { headline: "", subheadline: "", company_actual: 0, company_target: 0, by_lob: [] },
-    nps_detail: { headline: "", narrative: "", rows: [] },
-    recovery_tracker: { headline: "", subheadline: "", items: [] },
-    scenarios: { headline: "", subheadline: "", committed_m: 0, items: [] },
-    recommended_actions: { headline: "", subheadline: "", items: [] },
-    closing: { message: "Thank you", footer: "" },
-  };
-}
-
-let deck = emptyDeck();
+let SCHEMA = { sections: [] };
+let state = { fields: {}, rows: {}, config: {} };
 let activeTab = null;
+let saveTimer = null;
 
-const STATUS_OPTS = ["on_track", "cautious", "at_risk"];
-const TYPE_OPTS = ["growth", "savings"];
+const STATUS_COLOR = {
+  "On-track": "green", "Overachieved": "green",
+  "Cautious": "amber", "Watch": "amber",
+  "Critical": "red", "At-risk": "red",
+  "Not scored": "grey",
+};
 
-const GROUPS = [
-  { id: "cover", label: "Cover", scalarPath: ["cover"], fields: [
-      { name: "title", label: "Title" }, { name: "subtitle", label: "Subtitle" },
-      { name: "date_label", label: "Date label" }, { name: "footer", label: "Footer (every slide)" },
-  ]},
-  { id: "toc", label: "Contents", listPath: ["toc"], columns: [
-      { name: "number", label: "#" }, { name: "section", label: "Section" },
-      { name: "description", label: "Description" }, { name: "page", label: "Page" },
-  ]},
-  { id: "exec_summary", label: "Executive Summary", scalarPath: ["exec_summary"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-      { name: "committed_label", label: "Committed label" }, { name: "committed_bri_m", label: "Committed BRI (SAR m)", type: "number" },
-      { name: "savings_total_m", label: "Savings total (SAR m)", type: "number" },
-    ],
-    subTables: [
-      { title: "By execution tier", listPath: ["exec_summary", "ipi_tiers"], columns: [
-          { name: "label", label: "Label" }, { name: "bri_m", label: "BRI (m)", type: "number" },
-          { name: "color_key", label: "Color", type: "select", options: STATUS_OPTS },
-      ]},
-      { title: "Benefit status by line of business", listPath: ["exec_summary", "benefit_status_by_lob"], columns: [
-          { name: "lob", label: "LoB" }, { name: "percent_on_track", label: "% On track", type: "number" },
-          { name: "bri_m", label: "BRI (m)", type: "number" },
-      ]},
-      { title: "Savings breakdown", listPath: ["exec_summary", "savings_breakdown"], columns: [
-          { name: "category", label: "Category" }, { name: "amount_m", label: "Amount (m)", type: "number" },
-          { name: "detail", label: "Detail" },
-      ]},
-    ],
-  },
-  { id: "context_gwp", label: "Context (GWP)", scalarPath: ["context_gwp"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-      { name: "by_lob_year_label", label: "By-LoB panel label" },
-    ],
-    subTables: [
-      { title: "GWP by year", listPath: ["context_gwp", "years"], columns: [
-          { name: "year", label: "Year" }, { name: "bau_m", label: "BAU (m)", type: "number" },
-          { name: "initiative_m", label: "Initiative (m)", type: "number" },
-      ]},
-      { title: "GWP by line of business", listPath: ["context_gwp", "by_lob"], columns: [
-          { name: "lob", label: "LoB" }, { name: "gwp_m", label: "GWP (m)", type: "number" },
-      ]},
-    ],
-  },
-  { id: "ipi_sector", label: "Execution Signal (IPI)", scalarPath: ["ipi_sector"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-      { name: "read_note", label: "Read note (italic caption)", wide: true },
-    ],
-    listPath: ["ipi_sector", "items"], columns: [
-      { name: "lob", label: "LoB" }, { name: "ipi", label: "IPI (0-5)", type: "number" },
-    ],
-  },
-  { id: "lob_overview", label: "LoB Overview", scalarPath: ["lob_overview"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "narrative", label: "Narrative", wide: true, type: "textarea" },
-    ],
-    listPath: ["lob_overview", "rows"], columns: [
-      { name: "lob", label: "LoB" }, { name: "status_summary", label: "Status summary" },
-      { name: "bri_m", label: "BRI (m)", type: "number" }, { name: "ipi", label: "IPI", type: "number" },
-    ],
-  },
-  { id: "initiatives", label: "Initiatives", listPath: ["initiatives"],
-    hint: "One row per initiative. Rows are grouped by LoB into one deep-dive slide per line of business.",
-    columns: [
-      { name: "lob", label: "LoB" }, { name: "initiative", label: "Initiative" }, { name: "subtitle", label: "Subtitle" },
-      { name: "ipi", label: "IPI", type: "number" }, { name: "ti", label: "TI", type: "number" },
-      { name: "bri_committed_m", label: "BRI committed (m)", type: "number" }, { name: "bri_actual_m", label: "BRI actual (m)", type: "number" },
-      { name: "status", label: "Status", type: "select", options: STATUS_OPTS }, { name: "comments", label: "Comments" },
-    ],
-  },
-  { id: "projects", label: "Projects", listPath: ["projects"],
-    hint: "One row per delivery project. Rows are grouped by LoB into a projects slide per line of business.",
-    columns: [
-      { name: "lob", label: "LoB" }, { name: "initiative", label: "Initiative" }, { name: "project", label: "Project" },
-      { name: "ipi", label: "IPI", type: "number" }, { name: "ti", label: "TI", type: "number" }, { name: "comments", label: "Comments" },
-    ],
-  },
-  { id: "nps_summary", label: "NPS Summary", scalarPath: ["nps_summary"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-      { name: "company_actual", label: "Companywide actual", type: "number" }, { name: "company_target", label: "Companywide target", type: "number" },
-    ],
-    listPath: ["nps_summary", "by_lob"], columns: [
-      { name: "lob", label: "LoB" }, { name: "actual", label: "Actual", type: "number" }, { name: "target", label: "Target", type: "number" },
-    ],
-  },
-  { id: "nps_detail", label: "NPS by Segment", scalarPath: ["nps_detail"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "narrative", label: "Narrative", wide: true, type: "textarea" },
-    ],
-    listPath: ["nps_detail", "rows"], columns: [
-      { name: "lob", label: "LoB" }, { name: "segment", label: "Segment" },
-      { name: "actual", label: "Actual", type: "number" }, { name: "target", label: "Target", type: "number" },
-    ],
-  },
-  { id: "recovery_tracker", label: "Recovery Tracker", scalarPath: ["recovery_tracker"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-    ],
-    listPath: ["recovery_tracker", "items"], columns: [
-      { name: "rank", label: "#", type: "number" }, { name: "initiative", label: "Initiative" }, { name: "lob", label: "LoB" },
-      { name: "item_type", label: "Type", type: "select", options: TYPE_OPTS }, { name: "bri_m", label: "BRI (m)", type: "number" },
-      { name: "status", label: "Status", type: "select", options: STATUS_OPTS },
-      { name: "ipi", label: "IPI", type: "number" }, { name: "ti", label: "TI", type: "number" },
-      { name: "root_cause", label: "Root cause" }, { name: "corrective_action", label: "Corrective action" }, { name: "owner", label: "Owner" },
-    ],
-  },
-  { id: "scenarios", label: "Scenarios", scalarPath: ["scenarios"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-      { name: "committed_m", label: "Committed (SAR m)", type: "number" },
-    ],
-    listPath: ["scenarios", "items"], columns: [
-      { name: "name", label: "Name" }, { name: "description", label: "Description" },
-      { name: "value_m", label: "Value (m)", type: "number" }, { name: "percent", label: "Percent", type: "number" },
-    ],
-  },
-  { id: "recommended_actions", label: "Recommended Actions", scalarPath: ["recommended_actions"], fields: [
-      { name: "headline", label: "Headline", wide: true }, { name: "subheadline", label: "Subheadline", wide: true },
-    ],
-    listPath: ["recommended_actions", "items"], columns: [
-      { name: "title", label: "Title" }, { name: "description", label: "Description" },
-    ],
-  },
-  { id: "closing", label: "Closing", scalarPath: ["closing"], fields: [
-      { name: "message", label: "Message" }, { name: "footer", label: "Footer (blank = use cover footer)" },
-    ],
-  },
-];
-
-function getAt(obj, path) {
-  return path.reduce((o, k) => (o == null ? o : o[k]), obj);
-}
-
-function emptyRow(columns) {
-  const row = {};
-  for (const c of columns) row[c.name] = c.type === "number" ? 0 : "";
-  return row;
-}
-
-function el(tag, attrs = {}, children = []) {
-  const node = document.createElement(tag);
+// ---- helpers -------------------------------------------------------------
+function el(tag, attrs = {}, kids = []) {
+  const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
-    if (k === "class") node.className = v;
-    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v);
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) n.setAttribute(k, v);
   }
-  for (const child of [].concat(children)) {
-    node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
-  }
-  return node;
+  for (const kid of [].concat(kids)) if (kid != null) n.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+  return n;
+}
+const getF = (key) => (state.fields[key] ?? "");
+function setF(key, val) {
+  if (val === "" || val === null || val === undefined) delete state.fields[key];
+  else state.fields[key] = val;
+  scheduleSave();
+}
+const rowCount = (tid) => Math.max(0, parseInt(state.rows[tid] ?? 0, 10));
+
+function toast(msg, kind = "") {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.className = "toast " + kind; t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), 4200);
 }
 
-function renderScalarFields(container, basePath, fields) {
+// ---- autosave ------------------------------------------------------------
+function scheduleSave() {
+  setSaveState("saving");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSave, 600);
+}
+async function flushSave() {
+  try {
+    const res = await fetch("/api/state", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: state.fields, rows: state.rows }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    setSaveState("saved");
+  } catch (e) { setSaveState("error"); toast("Autosave failed: " + e.message, "error"); }
+}
+function setSaveState(s) {
+  const n = document.getElementById("saveState");
+  if (s === "saving") { n.textContent = "Saving…"; n.className = "save-state saving"; }
+  else if (s === "error") { n.textContent = "Save failed"; n.className = "save-state"; }
+  else { n.textContent = "All changes saved"; n.className = "save-state"; }
+}
+
+// ---- computed columns ----------------------------------------------------
+function computeCell(expr, rowVals) {
+  const m = expr.match(/^(\w+)\s*([+\-])\s*(\w+)$/);
+  if (!m) return "";
+  const a = parseFloat(rowVals[m[1]]) || 0, b = parseFloat(rowVals[m[3]]) || 0;
+  const r = m[2] === "+" ? a + b : a - b;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+
+// ---- rendering: fields ---------------------------------------------------
+function renderFieldsBlock(block) {
   const grid = el("div", { class: "field-grid" });
-  for (const f of fields) {
-    const value = getAt(deck, basePath)[f.name];
-    const wrap = el("div", { class: "field" + (f.wide ? " wide" : "") });
+  for (const f of block.fields) {
+    const wide = f.type === "textarea";
+    const wrap = el("div", { class: "field" + (wide ? " wide" : "") });
     wrap.appendChild(el("label", {}, f.label));
     let input;
     if (f.type === "textarea") {
-      input = el("textarea", {});
-      input.value = value ?? "";
+      input = el("textarea", {}); input.value = getF(f.key);
+    } else if (f.type === "select") {
+      input = el("select", {}, (f.options || []).map((o) => el("option", { value: o }, o)));
+      input.value = getF(f.key) || (f.options ? f.options[0] : "");
     } else {
-      input = el("input", { type: f.type === "number" ? "number" : "text" });
-      input.value = value ?? "";
+      input = el("input", { type: f.type === "number" || f.type === "pct" ? "number" : "text",
+        step: "any", placeholder: f.type === "pct" ? "%" : "" });
+      input.value = getF(f.key);
     }
-    input.addEventListener("input", () => {
-      const target = getAt(deck, basePath);
-      target[f.name] = f.type === "number" ? (parseFloat(input.value) || 0) : input.value;
-    });
+    input.addEventListener("input", () => setF(f.key, input.value));
     wrap.appendChild(input);
     grid.appendChild(wrap);
   }
-  container.appendChild(grid);
+  return el("div", { class: "block" }, [el("h3", {}, block.title), grid]);
 }
 
-function renderTable(container, title, listPath, columns, hint) {
-  if (title) container.appendChild(el("h3", {}, title));
-  if (hint) container.appendChild(el("div", { class: "empty-hint" }, hint));
+// ---- rendering: tables ---------------------------------------------------
+function readRow(tid, i, columns) {
+  const o = {};
+  for (const c of columns) o[c.name] = getF(`${tid}.${i}.${c.name}`);
+  return o;
+}
+function shiftRowsUp(tid, columns, removeIdx, count) {
+  // compact: move every row after removeIdx down by one, drop the last
+  for (let i = removeIdx; i < count - 1; i++) {
+    for (const c of columns) {
+      const nextVal = getF(`${tid}.${i + 1}.${c.name}`);
+      if (nextVal === "") delete state.fields[`${tid}.${i}.${c.name}`];
+      else state.fields[`${tid}.${i}.${c.name}`] = nextVal;
+    }
+  }
+  for (const c of columns) delete state.fields[`${tid}.${count - 1}.${c.name}`];
+  state.rows[tid] = count - 1;
+}
+
+function renderTableBlock(block) {
+  const tid = block.id;
+  const columns = block.columns;
   const wrap = el("div", { class: "table-wrap" });
   const table = el("table", { class: "grid" });
-  const thead = el("tr", {}, columns.map((c) => el("th", {}, c.label)).concat([el("th", {}, "")]));
-  table.appendChild(el("thead", {}, thead));
+  const headRow = el("tr", {}, columns.map((c) => el("th", {}, c.label)).concat([el("th", {}, "")]));
+  table.appendChild(el("thead", {}, headRow));
   const tbody = el("tbody", {});
+  const n = rowCount(tid);
 
-  const list = getAt(deck, listPath);
-  list.forEach((row, idx) => {
+  for (let i = 0; i < n; i++) {
     const tr = el("tr", {});
+    const cellInputs = {};
     for (const c of columns) {
       const td = el("td", {});
-      let input;
-      if (c.type === "select") {
-        input = el("select", {}, c.options.map((o) => el("option", { value: o }, o)));
-        input.value = row[c.name] || c.options[0];
+      const key = `${tid}.${i}.${c.name}`;
+      if (c.computed) {
+        td.className = "computed";
+        const span = el("span", {}, computeCell(c.computed, readRow(tid, i, columns)));
+        td._compute = () => (span.textContent = computeCell(c.computed, readRow(tid, i, columns)));
+        td.appendChild(span);
+        td.dataset.compute = "1";
+        tr._computedCells = (tr._computedCells || []).concat(td);
+      } else if (c.type === "select") {
+        const sel = el("select", {}, (c.options || []).map((o) => el("option", { value: o }, o)));
+        sel.value = getF(key) || (c.options ? c.options[0] : "");
+        const badge = el("span", { class: "badge " + (STATUS_COLOR[sel.value] || "grey") }, sel.value);
+        const cell = el("div", { class: "status-cell" }, [sel, badge]);
+        sel.addEventListener("change", () => {
+          setF(key, sel.value);
+          badge.className = "badge " + (STATUS_COLOR[sel.value] || "grey");
+          badge.textContent = sel.value;
+        });
+        td.appendChild(cell);
       } else {
-        input = el("input", { type: c.type === "number" ? "number" : "text" });
-        input.value = row[c.name] ?? "";
+        const input = el("input", { type: c.type === "number" || c.type === "pct" ? "number" : "text", step: "any" });
+        input.value = getF(key);
+        input.addEventListener("input", () => {
+          setF(key, input.value);
+          if (tr._computedCells) tr._computedCells.forEach((cc) => cc._compute && cc._compute());
+          if (c.name === "ipi" && tr._ipiBar) tr._ipiBar(parseFloat(input.value));
+        });
+        cellInputs[c.name] = input;
+        // IPI mini-bar
+        if (c.name === "ipi") {
+          const track = el("div", { class: "bar-track" });
+          const fill = el("div", { class: "bar-fill" });
+          track.appendChild(fill);
+          const paint = (v) => {
+            v = isNaN(v) ? 0 : v;
+            fill.style.width = Math.max(0, Math.min(100, (v / 5) * 100)) + "%";
+            fill.style.background = v >= 3.0 ? "var(--green)" : v >= 2.6 ? "var(--amber)" : "var(--red)";
+          };
+          paint(parseFloat(input.value));
+          tr._ipiBar = paint;
+          td.appendChild(el("div", { class: "bar-wrap" }, [input, track]));
+        } else {
+          td.appendChild(input);
+        }
       }
-      input.addEventListener("input", () => {
-        row[c.name] = c.type === "number" ? (parseFloat(input.value) || 0) : input.value;
-      });
-      td.appendChild(input);
       tr.appendChild(td);
     }
-    const actionTd = el("td", { class: "row-actions" });
-    const delBtn = el("button", { title: "Remove row", onclick: () => { list.splice(idx, 1); renderPanel(activeTab); } }, "✕");
-    actionTd.appendChild(delBtn);
-    tr.appendChild(actionTd);
+    const delTd = el("td", {});
+    delTd.appendChild(el("button", { class: "row-del", title: "Delete row",
+      onclick: () => { shiftRowsUp(tid, columns, i, rowCount(tid)); scheduleSave(); renderTab(activeTab); } }, "✕"));
+    tr.appendChild(delTd);
     tbody.appendChild(tr);
-  });
+  }
   table.appendChild(tbody);
   wrap.appendChild(table);
-  container.appendChild(wrap);
 
-  const toolbar = el("div", { class: "table-toolbar" });
-  const addBtn = el("button", {
-    class: "add-row-btn",
-    onclick: () => { list.push(emptyRow(columns)); renderPanel(activeTab); },
-  }, "+ Add row");
-  toolbar.appendChild(addBtn);
-  toolbar.appendChild(el("span", { class: "empty-hint" }, `${list.length} row${list.length === 1 ? "" : "s"}`));
-  container.appendChild(toolbar);
+  const foot = el("div", { class: "table-foot" }, [
+    el("button", { class: "add-row", onclick: () => { state.rows[tid] = rowCount(tid) + 1; scheduleSave(); renderTab(activeTab); } }, "+ Add row"),
+    el("span", { class: "count-hint" }, `${n} row${n === 1 ? "" : "s"}`),
+  ]);
+  return el("div", { class: "block" }, [el("h3", {}, block.title), wrap, foot]);
 }
 
-function renderPanel(tabId) {
-  activeTab = tabId;
-  const group = GROUPS.find((g) => g.id === tabId);
-  const panel = document.getElementById("panel");
-  panel.innerHTML = "";
-  panel.appendChild(el("h2", {}, group.label));
-
-  if (group.fields) renderScalarFields(panel, group.scalarPath, group.fields);
-  if (group.listPath) renderTable(panel, group.fields ? "" : "", group.listPath, group.columns, group.hint);
-  if (group.subTables) {
-    for (const st of group.subTables) {
-      renderTable(panel, st.title, st.listPath, st.columns);
-    }
+// ---- rendering: tab + tabbar --------------------------------------------
+function renderTab(secId) {
+  activeTab = secId;
+  const sec = SCHEMA.sections.find((s) => s.id === secId);
+  const content = document.getElementById("content");
+  content.innerHTML = "";
+  content.appendChild(el("h1", {}, sec.label));
+  for (const block of sec.blocks) {
+    content.appendChild(block.type === "fields" ? renderFieldsBlock(block) : renderTableBlock(block));
   }
-
-  document.querySelectorAll("#tabNav button").forEach((b) => b.classList.toggle("active", b.dataset.id === tabId));
+  document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.id === secId));
+  window.scrollTo(0, 0);
+}
+function renderTabbar() {
+  const bar = document.getElementById("tabbar");
+  bar.innerHTML = "";
+  SCHEMA.sections.forEach((s, i) => {
+    const btn = el("button", { "data-id": s.id, onclick: () => renderTab(s.id) },
+      [el("span", { class: "tab-num" }, String(i + 1).padStart(2, "0")), s.label]);
+    bar.appendChild(btn);
+  });
 }
 
-function renderNav() {
-  const nav = document.getElementById("tabNav");
-  nav.innerHTML = "";
-  for (const g of GROUPS) {
-    const btn = el("button", { "data-id": g.id, onclick: () => renderPanel(g.id) }, g.label);
-    nav.appendChild(btn);
-  }
+// ---- modal ---------------------------------------------------------------
+function showModal(node) {
+  const host = document.getElementById("modal");
+  host.innerHTML = ""; host.appendChild(node);
+  document.getElementById("modalOverlay").hidden = false;
 }
-
-function toast(msg, isError = false) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.classList.toggle("error", isError);
-  t.hidden = false;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { t.hidden = true; }, 3500);
-}
-
-async function downloadBlob(url, filenameFallback, init) {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  const blob = await res.blob();
-  const disposition = res.headers.get("Content-Disposition") || "";
-  const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : filenameFallback;
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-document.getElementById("btnTemplate").addEventListener("click", () => {
-  downloadBlob("/api/template", "blank_template.xlsx").catch((e) => toast(e.message, true));
+function closeModal() { document.getElementById("modalOverlay").hidden = true; }
+document.getElementById("modalOverlay").addEventListener("click", (e) => {
+  if (e.target.id === "modalOverlay") closeModal();
 });
 
-document.getElementById("btnSample").addEventListener("click", () => {
-  downloadBlob("/api/template?sample=true", "sample_template.xlsx").catch((e) => toast(e.message, true));
+// ---- data menu actions ---------------------------------------------------
+function toggleMenu(force) {
+  const m = document.getElementById("dataMenu");
+  m.hidden = force !== undefined ? !force : !m.hidden;
+}
+document.getElementById("btnDataMenu").addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
+document.addEventListener("click", () => toggleMenu(false));
+document.getElementById("dataMenu").addEventListener("click", (e) => e.stopPropagation());
+
+document.getElementById("dataMenu").addEventListener("click", (e) => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  toggleMenu(false);
+  if (act === "template") downloadTemplate();
+  else if (act === "importTemplate") document.getElementById("fileTemplate").click();
+  else if (act === "importIpi") document.getElementById("fileIpi").click();
+  else if (act === "importMilestones") askGraceThenImportMilestones();
+  else if (act === "reset") confirmReset();
 });
 
-document.getElementById("btnUpload").addEventListener("click", () => document.getElementById("fileInput").click());
-
-document.getElementById("fileInput").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const form = new FormData();
-  form.append("file", file);
+async function downloadTemplate() {
   try {
-    const res = await fetch("/api/upload", { method: "POST", body: form });
+    const res = await fetch("/api/template");
     if (!res.ok) throw new Error(await res.text());
-    deck = await res.json();
-    renderPanel(activeTab || GROUPS[0].id);
-    toast("Workbook loaded.");
-  } catch (err) {
-    toast("Upload failed: " + err.message, true);
-  }
-  e.target.value = "";
-});
+    const blob = await res.blob();
+    const a = el("a", { href: URL.createObjectURL(blob), download: "strategic_health_check_template.xlsx" });
+    document.body.appendChild(a); a.click(); a.remove();
+    toast("Template downloaded — fill the Value column and re-import.", "ok");
+  } catch (e) { toast("Download failed: " + e.message, "error"); }
+}
 
-document.getElementById("btnExportPptx").addEventListener("click", async () => {
+document.getElementById("fileTemplate").addEventListener("change", async (e) => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  const form = new FormData(); form.append("file", file);
   try {
-    await downloadBlob("/api/export/pptx", "deck.pptx", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(deck),
-    });
-    toast("PPTX exported.");
-  } catch (err) {
-    toast("Export failed: " + err.message, true);
-  }
+    const res = await fetch("/api/import/template", { method: "POST", body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    state = data.state; renderTab(activeTab);
+    toast(`Imported ${data.applied} values from template.`, "ok");
+  } catch (err) { toast("Template import failed: " + err.message, "error"); }
 });
 
-document.getElementById("btnExportXlsx").addEventListener("click", async () => {
+document.getElementById("fileIpi").addEventListener("change", async (e) => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  const form = new FormData(); form.append("file", file);
   try {
-    await downloadBlob("/api/export/xlsx", "deck.xlsx", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(deck),
-    });
-    toast("Excel exported.");
-  } catch (err) {
-    toast("Export failed: " + err.message, true);
-  }
+    const res = await fetch("/api/import/ipi", { method: "POST", body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    state = data.state; renderTab(activeTab);
+    showIpiReference(data);
+  } catch (err) { toast("IPI import failed: " + err.message, "error"); }
 });
 
-renderNav();
-renderPanel(GROUPS[0].id);
+function showIpiReference(data) {
+  const r = data.reference;
+  const sb = r.status_breakdown || {};
+  const refRows = [
+    ["Enterprise IPI (written to Exec Summary)", r.enterprise_ipi],
+    ["Strategic projects = SBP + SEP (written)", r.strategic],
+    ["Total projects", r.total_projects],
+    ["CP (change/BAU)", r.cp],
+    ["SBP + SEP split", `${r.sbp} + ${r.sep}`],
+    ...Object.entries(sb).map(([k, v]) => [k, v]),
+  ];
+  const table = el("table", { class: "ref-table" },
+    refRows.map(([k, v]) => el("tr", {}, [el("td", {}, k), el("td", {}, String(v))])));
+  showModal(el("div", {}, [
+    el("h3", {}, "IPI Accountability imported"),
+    el("p", {}, "Enterprise IPI and the strategic project count were written to the Executive Summary. The figures below are a read-only sanity check and were not written anywhere."),
+    table,
+    el("div", { class: "modal-actions" }, [el("button", { class: "btn primary", onclick: closeModal }, "Done")]),
+  ]));
+}
+
+function askGraceThenImportMilestones() {
+  const graceInput = el("input", { type: "number", min: "0", step: "1", value: String(state.config?.delayed_grace_days ?? 0) });
+  showModal(el("div", {}, [
+    el("h3", {}, "Import Strategic Milestones"),
+    el("p", { html: "Classification: <b>complete</b> = progress ≥ 100%; <b>delayed</b> = past due date and not complete; <b>not-yet-due</b> = everything else." }),
+    el("div", { class: "grace-row" }, [
+      el("label", { html: "Grace period (days past due before counting as delayed):" }), graceInput,
+    ]),
+    el("div", { class: "modal-actions" }, [
+      el("button", { class: "btn ghost", onclick: closeModal }, "Cancel"),
+      el("button", { class: "btn primary", onclick: () => {
+        closeModal();
+        document.getElementById("fileMilestones").dataset.grace = String(parseInt(graceInput.value, 10) || 0);
+        document.getElementById("fileMilestones").click();
+      } }, "Choose file…"),
+    ]),
+  ]));
+}
+
+document.getElementById("fileMilestones").addEventListener("change", async (e) => {
+  const file = e.target.files[0]; const grace = e.target.dataset.grace || "0"; e.target.value = "";
+  if (!file) return;
+  const form = new FormData(); form.append("file", file);
+  try {
+    const res = await fetch(`/api/import/milestones?grace_days=${encodeURIComponent(grace)}`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    state = data.state; renderTab(activeTab);
+    const r = data.reference;
+    const table = el("table", { class: "ref-table" }, [
+      ["Total milestones", r.total], ["Complete", r.complete], ["Delayed", r.delayed],
+      ["Not-yet-due", r.not_yet_due], ["Grace period (days)", r.grace_days],
+    ].map(([k, v]) => el("tr", {}, [el("td", {}, k), el("td", {}, String(v))])));
+    showModal(el("div", {}, [
+      el("h3", {}, "Strategic Milestones imported"),
+      el("p", {}, "Milestone counts were written to the Executive Summary."),
+      table,
+      el("div", { class: "note" }, data.note),
+      el("div", { class: "modal-actions" }, [el("button", { class: "btn primary", onclick: closeModal }, "Done")]),
+    ]));
+  } catch (err) { toast("Milestones import failed: " + err.message, "error"); }
+});
+
+function confirmReset() {
+  showModal(el("div", {}, [
+    el("h3", {}, "Reset to blank?"),
+    el("p", {}, "This permanently clears all dashboard data on this machine and restores the default section labels. This cannot be undone."),
+    el("div", { class: "modal-actions" }, [
+      el("button", { class: "btn ghost", onclick: closeModal }, "Cancel"),
+      el("button", { class: "btn primary", onclick: async () => {
+        try {
+          const res = await fetch("/api/reset", { method: "POST" });
+          state = await res.json(); renderTab(activeTab); closeModal();
+          toast("Dashboard reset to blank.", "ok");
+        } catch (e) { toast("Reset failed: " + e.message, "error"); }
+      } }, "Reset everything"),
+    ]),
+  ]));
+}
+
+document.getElementById("btnExport").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/export/pptx", { method: "POST" });
+    if (res.ok) {
+      const blob = await res.blob();
+      const a = el("a", { href: URL.createObjectURL(blob), download: "strategic_health_check.pptx" });
+      document.body.appendChild(a); a.click(); a.remove();
+      toast("PPTX exported.", "ok");
+    } else {
+      const msg = await res.text();
+      toast(tryJson(msg), "");
+    }
+  } catch (e) { toast("Export failed: " + e.message, "error"); }
+});
+function tryJson(s) { try { return JSON.parse(s).detail || s; } catch { return s; } }
+
+// ---- boot ----------------------------------------------------------------
+async function boot() {
+  const [schemaRes, stateRes] = await Promise.all([fetch("/api/schema"), fetch("/api/state")]);
+  SCHEMA = await schemaRes.json();
+  state = await stateRes.json();
+  state.fields = state.fields || {}; state.rows = state.rows || {}; state.config = state.config || {};
+  renderTabbar();
+  renderTab(SCHEMA.sections[0].id);
+}
+boot();

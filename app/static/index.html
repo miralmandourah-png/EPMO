@@ -3,33 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deck Builder</title>
+<title>Strategic Health Check Platform</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">Deck Builder</div>
+  <div class="brand">
+    <span class="dot"></span>
+    Strategic Health Check <span class="brand-sub">Platform</span>
+  </div>
+  <div class="save-state" id="saveState">All changes saved</div>
   <div class="actions">
-    <input id="fileInput" type="file" accept=".xlsx,.xlsm" hidden>
-    <button id="btnUpload" class="btn">Upload Excel</button>
-    <button id="btnTemplate" class="btn ghost">Blank Template</button>
-    <button id="btnSample" class="btn ghost">Sample Template</button>
-    <button id="btnExportXlsx" class="btn ghost">Save as Excel</button>
-    <button id="btnExportPptx" class="btn primary">Export PPTX</button>
+    <div class="menu">
+      <button class="btn ghost" id="btnDataMenu">Data ▾</button>
+      <div class="menu-panel" id="dataMenu" hidden>
+        <button data-act="template">⬇ Download full Excel template</button>
+        <button data-act="importTemplate">⬆ Import filled template</button>
+        <div class="menu-sep"></div>
+        <button data-act="importIpi">⬆ Import IPI Accountability</button>
+        <button data-act="importMilestones">⬆ Import Milestones</button>
+        <div class="menu-sep"></div>
+        <button data-act="reset" class="danger">⟲ Reset to blank…</button>
+      </div>
+    </div>
+    <button class="btn primary" id="btnExport">Export PPTX</button>
   </div>
 </header>
 
-<div class="confidentiality">
-  Everything you upload or edit stays in this browser tab and is processed only in memory for the
-  duration of each request — nothing is saved on the server.
-</div>
+<nav class="tabbar" id="tabbar"></nav>
+
+<main class="content" id="content"></main>
 
 <div id="toast" class="toast" hidden></div>
 
-<main class="layout">
-  <nav id="tabNav" class="tabnav"></nav>
-  <section id="panel" class="panel"></section>
-</main>
+<!-- hidden file inputs -->
+<input type="file" id="fileTemplate" accept=".xlsx,.xlsm" hidden>
+<input type="file" id="fileIpi" accept=".xlsx,.xlsm" hidden>
+<input type="file" id="fileMilestones" accept=".xlsx,.xlsm" hidden>
+
+<!-- modal host -->
+<div class="modal-overlay" id="modalOverlay" hidden>
+  <div class="modal" id="modal"></div>
+</div>
 
 <script src="/app.js"></script>
 </body>

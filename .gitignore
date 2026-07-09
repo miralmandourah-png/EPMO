@@ -1,7 +1,18 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# Local, confidential data — never commit
+/data/
+uploads/
+templates/
 *.xlsx
+*.xlsm
 *.pptx
 *.pdf
+
+# Runtime
+uv.log
+*.log
 .DS_Store

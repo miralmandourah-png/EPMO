@@ -1,86 +1,102 @@
-# Deck Builder
+# Strategic Health Check Platform
 
-A local web app for turning an Excel workbook of strategy-review numbers into a
-branded PowerPoint deck: upload a workbook, review/edit the numbers in the
-browser, then export a `.pptx` (and, if you want, a cleaned-up `.xlsx` back).
+A local, single-user web app that replaces the manual monthly *"Strategic
+Health Check by LoB"* CEO PowerPoint process. You edit an executive reporting
+dashboard inline across **14 sections**, populate it from Excel exports, it
+**autosaves to a local file**, and (Phase 2) it exports a branded PowerPoint
+deck by editing your existing template in place.
 
-It reproduces the recurring slide types from a strategic-review deck
-(cover, contents, executive summary KPIs, GWP context charts, IPI-by-sector,
-line-of-business deep-dive tables, NPS, an EPMO recovery tracker, scenarios,
-and recommended actions) as reusable templates driven entirely by your data —
-no company-specific numbers are built into the tool itself.
+## Your data stays on your machine
 
-## Confidentiality
+The app runs entirely on your computer. It makes **no calls to any cloud
+service, third-party API, analytics, or telemetry**. All dashboard data is
+stored in a single local file, `data/state.json`. Excel and PowerPoint files
+you upload are read in memory only for that one request and are never sent
+anywhere. The `data/` folder and any uploaded source files are gitignored so
+they are never committed.
 
-- Nothing you upload or edit is written to disk or logged on the server.
-  Uploaded workbooks and edited data live only in server request memory
-  (parsed and discarded) and in your browser tab's memory (lost on reload).
-- This is meant to run locally / on infrastructure you control. Don't expose
-  it on the open internet without adding authentication.
+---
 
-## Running it
+## Setup & run (for a non-technical user)
+
+You need **Python 3.9 or newer**. Check with `python3 --version`; if you don't
+have it, install from [python.org](https://www.python.org/downloads/).
+
+Open a terminal **in this project folder** and run these once:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Then start the app (this is the command you'll use every time):
+
+```bash
 uvicorn app.main:app --reload
 ```
 
-Then open http://127.0.0.1:8000 in your browser.
+Open **http://localhost:8000** in your browser. To stop it, press `Ctrl+C`.
 
-## Workflow
+Next time, you only need:
 
-1. Click **Blank Template** (or **Sample Template** to see the shape of the
-   data with placeholder numbers) to download an `.xlsx`.
-2. Fill in your real numbers in Excel — one sheet per section (see below).
-3. Click **Upload Excel** and select your filled-in workbook. The app parses
-   it and populates every editable tab.
-4. Tweak numbers, headlines, or table rows directly in the browser.
-5. Click **Export PPTX** to download the generated deck, or **Save as Excel**
-   to download your edits back into the same workbook shape.
+```bash
+source .venv/bin/activate
+uvicorn app.main:app --reload
+```
 
-## Workbook structure
+---
 
-- **Meta** — headlines, subheadlines, narratives and single numbers (one
-  `Section / Field / Value` row per item).
-- One sheet per repeating table: `TOC`, `IPI_Tiers`, `LoB_Status`,
-  `Savings_Breakdown`, `GWP_Years`, `GWP_By_LoB`, `IPI_By_Sector`,
-  `LoB_Overview`, `Initiatives`, `Projects`, `NPS_By_LoB`, `NPS_Detail`,
-  `Recovery_Tracker`, `Scenarios`, `Recommended_Actions`.
+## Using it
 
-`Initiatives` and `Projects` are long-format tables with a `lob` column —
-each distinct value in that column becomes its own line-of-business
-deep-dive slide (and, for `Projects`, a matching "projects under each
-initiative" slide), so you don't need to add sheets per line of business.
+The top bar has a **tab per section** (Executive Summary, Context, Execution
+Signal, LoB Scorecard, the four LoB deep-dives, Customer Experience, Human
+Resources, Recovery Tracker, Scenarios, Summary & Actions, Dividers). Every
+number and text box is click-to-edit and **autosaves** — the top bar shows
+"Saving…" then "All changes saved".
 
-`status` and `item_type` columns are constrained to fixed values
-(`on_track` / `cautious` / `at_risk`, and `growth` / `savings`) via dropdown
-validation in the template, since slide coloring is keyed off those exact
-strings.
+### Three ways to get data in
 
-A slide type is only generated if its underlying sheet(s) have data — leave a
-sheet empty and that slide/section is skipped.
+Use the **Data ▾** menu (top right):
+
+1. **Manual editing** — just type into any field.
+2. **Full Excel template** — *Download full Excel template* gives you an
+   `.xlsx` with a `Key | Label | Value` row for every field, pre-filled with
+   your current values. Fill in the **Value** column and *Import filled
+   template* to overwrite everything by key.
+3. **Source-system exports** (targeted fields only — everything else is left
+   untouched):
+   - **Import IPI Accountability** — reads the *Data Table* sheet's summary
+     block, writes **Enterprise IPI** and **Strategic project count**
+     (`SBP + SEP`) to the Executive Summary, and shows a read-only reference
+     summary (total projects, CP vs strategic split, full status breakdown)
+     so you can sanity-check. If the expected labels aren't found it shows an
+     error and changes nothing.
+   - **Import Milestones** — classifies each milestone as **complete**
+     (progress ≥ 100%), **delayed** (past due date and not complete), or
+     **not-yet-due**, and writes the counts to the Executive Summary. The
+     delayed cutoff has a configurable **grace period** (default 0 days).
+
+**Reset to blank** (in the Data menu) clears everything behind a confirm
+dialog.
+
+### Export
+
+**Export PPTX** produces the branded deck. *(Phase 2 — in-place editing of
+your Tawuniya template; see CHANGES.md for status.)*
+
+---
 
 ## Project layout
 
 ```
 app/
-  models.py       # DeckData schema (pydantic)
-  theme.py        # colors, fonts, slide geometry
-  excel_io.py     # xlsx <-> DeckData (template generation + parsing)
-  ppt_helpers.py  # low-level python-pptx drawing helpers
-  ppt_builder.py  # one build_* function per slide type + orchestration
-  main.py         # FastAPI routes
-  static/         # vanilla HTML/CSS/JS frontend (no build step)
+  schema.py     # single source of truth: 14 sections, every field + dotted key
+  store.py      # local JSON persistence (data/state.json), autosave, reset
+  excel_io.py   # flat Key|Label|Value template + IPI & Milestones importers
+  theme.py      # Tawuniya brand colors / fonts / geometry (used by export)
+  main.py       # FastAPI routes
+  static/       # single-page dashboard (plain HTML/CSS/JS, no build step)
+data/
+  state.json    # your data (created on first run; gitignored)
 ```
-
-## Known limitations
-
-- Headlines/subheadlines for the per-LoB deep-dive slides are generated
-  automatically from the LoB name (e.g. "Health — Initiative Execution")
-  rather than freely editable per line of business.
-- The GWP trajectory chart uses a native PowerPoint chart object; every other
-  chart-like visual (IPI bars, NPS bars, progress bars) is drawn as plain
-  shapes so an on-track reference line and custom coloring could be added
-  precisely.
