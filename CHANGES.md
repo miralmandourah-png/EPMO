@@ -79,10 +79,25 @@ intercepting all clicks) was fixed.
 - Template file is stored locally at `data/template.pptx` (gitignored); its
   name is remembered in `data/state.json`.
 
-**Mapped so far**: cover, the five section dividers, both closing cards, and
-the six IPI-by-sector values (× their duplicates). **Not yet mapped**: the
-dense per-initiative deep-dive grids, exec-summary KPI tiles, recovery
-tracker, scenarios — these are left exactly as in the template until their
-per-cell coordinates are calibrated. The engine (`_find_near`,
-`_find_by_label`, `_value_right_of`, format-preserving `_set_box_text`) and
-the `*_SLIDES` duplicate lists are in place to extend to them.
+**Mapped so far**: cover, the five section dividers, both closing cards, the
+six IPI-by-sector values (× their duplicates), and — as of this update — the
+**Executive Summary slide's committed BRI, Enterprise IPI, strategic project
+count, and Strategic Milestones total/complete/not-yet-due/delayed** (the
+exact fields the IPI Accountability and Milestones importers populate). This
+closes the gap where those two importers wrote correctly to the dashboard but
+the export didn't reflect them yet: several of that slide's numbers live as
+one isolated run inside a longer label (e.g. "95  Strategic projects …773
+milestones"), so a new `_set_run_text` helper replaces exactly one run,
+leaving every neighboring tab/line-break/format untouched. Verified against
+the real uploaded files end-to-end, including through a live browser click-
+through (upload template → import IPI → import Milestones → Export),
+confirming the numbers land correctly and per-slide shape counts are
+unchanged.
+
+**Not yet mapped**: the dense per-initiative deep-dive grids (Health/Motor/
+General/Life), the Strategy & Ambition 2026→2030 table, benefit-status-by-LoB
+and savings-breakdown tables, recovery tracker, scenarios — these are left
+exactly as in the template until their per-cell coordinates are calibrated.
+The engine (`_find_near`/`_find_exact`, `_find_by_label`, `_value_right_of`,
+`_set_box_text`, `_set_run_text`) and the `*_SLIDES` duplicate lists are in
+place to extend to them.

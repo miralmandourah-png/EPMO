@@ -18,6 +18,7 @@ see CHANGES.md. Unmapped slides are left exactly as they are in the template.
 from __future__ import annotations
 
 import io
+import re
 from typing import Any, Dict, List, Optional
 
 from pptx import Presentation
@@ -48,6 +49,23 @@ def _set_box_text(shape, text: str) -> None:
     _set_paragraph_text(shape.text_frame.paragraphs[0], str(text))
 
 
+def _set_run_text(shape, run_index: int, text: str, para_index: int = 0) -> None:
+    """Replace exactly one run's text, leaving every other run/format untouched.
+
+    Used for boxes where a value is one isolated run inside a longer label
+    (e.g. "95  Strategic projects   773  milestones") so we never disturb
+    surrounding tabs, line breaks, or label formatting.
+    """
+    if not shape.has_text_frame:
+        return
+    paras = shape.text_frame.paragraphs
+    if para_index >= len(paras):
+        return
+    runs = paras[para_index].runs
+    if 0 <= run_index < len(runs):
+        runs[run_index].text = str(text)
+
+
 def _left_top_in(shape):
     try:
         return shape.left / IN, shape.top / IN
@@ -70,6 +88,12 @@ def _find_near(slide, left_in: float, top_in: float, tol: float = 0.3):
         if d <= best_d:
             best, best_d = sh, d
     return best
+
+
+def _find_exact(slide, left_in: float, top_in: float, tol: float = 0.05):
+    """Tight-tolerance lookup for dense slides (e.g. Executive Summary) where
+    _find_near's default tolerance would risk matching a neighboring box."""
+    return _find_near(slide, left_in, top_in, tol=tol)
 
 
 def _find_by_label(slide, label: str):
@@ -198,6 +222,99 @@ def _apply_ipi_sector(slide, sector_rows):
                 _set_box_text(val, match["ipi"])
 
 
+# Executive Summary slide (not duplicated elsewhere in the deck).
+EXEC_SUMMARY_SLIDES = [4]
+
+# (left_in, top_in) of each target box on slide 4, calibrated to this deck.
+EXEC_POS = {
+    "committed_bri": (9.182, 1.820),          # single run, e.g. "SAR 2,961m"
+    "enterprise_ipi": (4.703, 2.369),         # single run, e.g. "2.79"
+    "projects_milestones_line": (4.703, 3.186),  # run0=strategic projects, run6=ms total
+    "ms_total_line": (4.703, 4.013),          # last run ends "<N> Total"
+    "ms_complete": (4.655, 4.265),            # run0=count, run2="(NN%)"
+    "ms_not_yet_due": (6.708, 4.265),         # single run
+    "ms_delayed": (8.253, 4.295),             # single run
+}
+
+
+def _fmt_int(v: Any) -> Optional[str]:
+    try:
+        return str(int(round(float(v))))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_sar_m(v: Any) -> Optional[str]:
+    try:
+        return f"SAR {int(round(float(v))):,}m"
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_exec_summary(slide, fields: Dict[str, Any]) -> None:
+    bri = _get(fields, "exec.bri.total")
+    if bri is not None:
+        box = _find_exact(slide, *EXEC_POS["committed_bri"])
+        v = _fmt_sar_m(bri)
+        if box and v:
+            _set_run_text(box, 0, v)
+
+    ipi = _get(fields, "exec.health.enterprise_ipi")
+    if ipi is not None:
+        box = _find_exact(slide, *EXEC_POS["enterprise_ipi"])
+        try:
+            if box:
+                _set_run_text(box, 0, f"{float(ipi):.2f}")
+        except (TypeError, ValueError):
+            pass
+
+    sp = _get(fields, "exec.health.strategic_projects")
+    mt = _get(fields, "exec.health.ms_total")
+    if sp is not None or mt is not None:
+        box = _find_exact(slide, *EXEC_POS["projects_milestones_line"])
+        if box:
+            if sp is not None and (v := _fmt_int(sp)):
+                _set_run_text(box, 0, v)
+            if mt is not None and (v := _fmt_int(mt)):
+                _set_run_text(box, 6, v)
+
+    if mt is not None:
+        box = _find_exact(slide, *EXEC_POS["ms_total_line"])
+        v = _fmt_int(mt)
+        if box and v:
+            runs = box.text_frame.paragraphs[0].runs
+            if runs:
+                last = runs[-1]
+                last.text = re.sub(r"\d+", v, last.text, count=1) if re.search(r"\d+", last.text) else f"{v} Total"
+
+    mc = _get(fields, "exec.health.ms_complete")
+    if mc is not None:
+        box = _find_exact(slide, *EXEC_POS["ms_complete"])
+        v = _fmt_int(mc)
+        if box and v:
+            _set_run_text(box, 0, v)
+            if mt not in (None,) and _fmt_int(mt):
+                try:
+                    pct = round(float(mc) / float(mt) * 100)
+                    _set_run_text(box, 2, f"({pct}%)")
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+
+    mnyd = _get(fields, "exec.health.ms_not_yet_due")
+    if mnyd is not None:
+        box = _find_exact(slide, *EXEC_POS["ms_not_yet_due"])
+        v = _fmt_int(mnyd)
+        if box and v:
+            _set_run_text(box, 0, v)
+
+    md = _get(fields, "exec.health.ms_delayed")
+    if md is not None:
+        box = _find_exact(slide, *EXEC_POS["ms_delayed"])
+        v = _fmt_int(md)
+        if box and v:
+            _set_run_text(box, 0, v)
+
+
 def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
     """Return a new .pptx (bytes) = template with mapped values substituted."""
     fields = state.get("fields", {})
@@ -218,6 +335,9 @@ def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
     for idx in IPI_SECTOR_SLIDES:
         if idx <= n:
             _apply_ipi_sector(prs.slides[idx - 1], sector_rows)
+    for idx in EXEC_SUMMARY_SLIDES:
+        if idx <= n:
+            _apply_exec_summary(prs.slides[idx - 1], fields)
 
     buf = io.BytesIO()
     prs.save(buf)
