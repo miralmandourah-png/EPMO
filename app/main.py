@@ -14,7 +14,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import schema, store, excel_io
+from . import schema, store, excel_io, pptx_export
 
 app = FastAPI(title="Strategic Health Check Platform", docs_url=None, redoc_url=None)
 
@@ -114,15 +114,46 @@ async def import_milestones(file: UploadFile = File(...), grace_days: int = 0):
             "reference": result["reference"], "note": result["note"]}
 
 
-# ---- PPTX export (phase 2) ----------------------------------------------
+# ---- PPTX template + in-place export ------------------------------------
+
+@app.post("/api/template/pptx")
+async def upload_pptx_template(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith((".pptx",)):
+        raise HTTPException(400, "Please upload a .pptx file.")
+    raw = await file.read()
+    try:
+        info = pptx_export.template_info(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Could not read template: {exc}") from exc
+    store.save_template(raw)
+    store.set_config({"template_name": file.filename})
+    return {"configured": True, "name": file.filename, **info}
+
+
+@app.get("/api/template/pptx/info")
+def pptx_template_info():
+    raw = store.load_template()
+    if raw is None:
+        return {"configured": False}
+    name = store.load_state().get("config", {}).get("template_name")
+    return {"configured": True, "name": name, **pptx_export.template_info(raw)}
+
 
 @app.post("/api/export/pptx")
 def export_pptx():
-    raise HTTPException(
-        501,
-        "In-place branded PPTX export is being built in phase 2 (coordinate-mapped "
-        "to the Tawuniya template). The dashboard, autosave, and all Excel ingestion "
-        "are available now.",
+    raw = store.load_template()
+    if raw is None:
+        raise HTTPException(400, "No PowerPoint template configured yet. Upload your "
+                                 "branded .pptx template first (Data ▾ → Upload PPTX template).")
+    state = store.load_state()
+    try:
+        out = pptx_export.export_pptx(raw, state)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"Export failed: {exc}") from exc
+    return StreamingResponse(
+        io.BytesIO(out),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": 'attachment; filename="strategic_health_check.pptx"'},
     )
 
 

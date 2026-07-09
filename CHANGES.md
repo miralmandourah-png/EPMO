@@ -61,10 +61,28 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 2 — In-place branded PPTX export (next)
+## Phase 2 — In-place branded PPTX export (this release)
 
-Coordinate-mapped, in-place editing of the uploaded Tawuniya template:
-open with python-pptx, locate each value's text box by position on the mapped
-slide, replace only the text (preserving all brand XML), honoring the
-duplicate-slide rule. Template file path and the tab→slide mapping persist in
-`data/state.json`.
+**Added** — `app/pptx_export.py` plus template routes (`POST
+/api/template/pptx`, `GET /api/template/pptx/info`, real `POST
+/api/export/pptx`) and a **Upload PPTX template** UI action.
+
+- Opens the user's uploaded template and mutates **only text runs** — every
+  other piece of slide XML is untouched, so brand fidelity is exact.
+  **Verified**: exported deck keeps all 36 slides and an identical shape count
+  on every slide; it reopens cleanly.
+- Anchoring never uses the template's confidential figures — boxes are found
+  by position (coordinate map calibrated to this deck, per the user's choice)
+  and non-confidential structural labels (sector names, section numbers).
+- **Duplicate-slide rule** honored: the IPI-by-sector values are written from
+  one model copy to both slide 6 and its appendix duplicate slide 17 (verified).
+- Template file is stored locally at `data/template.pptx` (gitignored); its
+  name is remembered in `data/state.json`.
+
+**Mapped so far**: cover, the five section dividers, both closing cards, and
+the six IPI-by-sector values (× their duplicates). **Not yet mapped**: the
+dense per-initiative deep-dive grids, exec-summary KPI tiles, recovery
+tracker, scenarios — these are left exactly as in the template until their
+per-cell coordinates are calibrated. The engine (`_find_near`,
+`_find_by_label`, `_value_right_of`, format-preserving `_set_box_text`) and
+the `*_SLIDES` duplicate lists are in place to extend to them.

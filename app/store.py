@@ -29,8 +29,24 @@ from . import schema
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_PATH = DATA_DIR / "state.json"
+TEMPLATE_PATH = DATA_DIR / "template.pptx"
 
 _lock = threading.Lock()
+
+
+def save_template(data: bytes) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TEMPLATE_PATH.write_bytes(data)
+
+
+def load_template() -> "bytes | None":
+    if TEMPLATE_PATH.exists():
+        return TEMPLATE_PATH.read_bytes()
+    return None
+
+
+def has_template() -> bool:
+    return TEMPLATE_PATH.exists()
 
 
 def _now() -> str:

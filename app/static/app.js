@@ -9,6 +9,15 @@ let SCHEMA = { sections: [] };
 let state = { fields: {}, rows: {}, config: {} };
 let activeTab = null;
 let saveTimer = null;
+let templateConfigured = false;
+
+function updateExportButton() {
+  const btn = document.getElementById("btnExport");
+  btn.title = templateConfigured
+    ? "Export the branded deck from your template"
+    : "Upload a .pptx template first (Data ▾ → Upload PPTX template)";
+  btn.style.opacity = templateConfigured ? "1" : "0.6";
+}
 
 const STATUS_COLOR = {
   "On-track": "green", "Overachieved": "green",
@@ -248,7 +257,21 @@ document.getElementById("dataMenu").addEventListener("click", (e) => {
   else if (act === "importTemplate") document.getElementById("fileTemplate").click();
   else if (act === "importIpi") document.getElementById("fileIpi").click();
   else if (act === "importMilestones") askGraceThenImportMilestones();
+  else if (act === "uploadPptx") document.getElementById("filePptx").click();
   else if (act === "reset") confirmReset();
+});
+
+document.getElementById("filePptx").addEventListener("change", async (e) => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  const form = new FormData(); form.append("file", file);
+  try {
+    const res = await fetch("/api/template/pptx", { method: "POST", body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const info = await res.json();
+    templateConfigured = true; updateExportButton();
+    toast(`Template "${info.name}" set (${info.slide_count} slides). Export is ready.`, "ok");
+  } catch (err) { toast("Template upload failed: " + tryJson(err.message), "error"); }
 });
 
 async function downloadTemplate() {
@@ -393,5 +416,10 @@ async function boot() {
   state.fields = state.fields || {}; state.rows = state.rows || {}; state.config = state.config || {};
   renderTabbar();
   renderTab(SCHEMA.sections[0].id);
+  try {
+    const info = await (await fetch("/api/template/pptx/info")).json();
+    templateConfigured = !!info.configured;
+  } catch (e) { /* ignore */ }
+  updateExportButton();
 }
 boot();

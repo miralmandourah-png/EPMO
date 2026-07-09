@@ -80,10 +80,18 @@ Use the **Data ▾** menu (top right):
 **Reset to blank** (in the Data menu) clears everything behind a confirm
 dialog.
 
-### Export
+### Branded PowerPoint export
 
-**Export PPTX** produces the branded deck. *(Phase 2 — in-place editing of
-your Tawuniya template; see CHANGES.md for status.)*
+1. In the **Data ▾** menu, choose **Upload PPTX template** and select your
+   Tawuniya-branded `.pptx` once (it's remembered locally).
+2. Click **Export PPTX** (top right). The app opens *your* template and
+   substitutes only the text values — all backgrounds, theme colors, fonts,
+   logo, and layout are left exactly as they are, so brand fidelity is exact.
+   Duplicate CEO/appendix slides are filled from the same data automatically.
+
+The export button is dimmed until a template is uploaded. Currently mapped:
+the cover, section dividers, closing cards, and the IPI-by-sector values;
+the dense per-initiative tables are the next mapping step (see CHANGES.md).
 
 ---
 
