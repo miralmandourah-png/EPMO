@@ -61,7 +61,20 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 5 — Map the LoB deep-dive tables, CX, and HR (this release)
+## Phase 6 — Remove NPS entirely (this release)
+
+Per user request. Removed from `schema.py`:
+- Each LoB's "May-26 YTD Financials" NPS actual/target field.
+- The Customer Experience tab's NPS-by-line-of-business table and the four
+  NPS-by-segment tables (Health/Motor/General/Life).
+- The now-unused `cx.nps_lob` default-row seed.
+
+Nothing else in the codebase referenced NPS (no export mapping had been
+built for those slides yet, so there was nothing to unwind there). Verified
+the app still boots, the schema loads, and the full import/export round
+trip still works after removal.
+
+## Phase 5 — Map the LoB deep-dive tables, CX, and HR
 
 Per the user's request to map everything, plus "the initiative names and
 project names ... populate them from the presentation into the platform,

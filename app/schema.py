@@ -81,7 +81,6 @@ def _lob_deepdive(lob_id: str, lob_label: str) -> Dict[str, Any]:
                 *_actual_target(f"{lob_id}.fin.loss_ratio", "Loss ratio"),
                 *_actual_target(f"{lob_id}.fin.combined_ratio", "Combined ratio"),
                 *_actual_target(f"{lob_id}.fin.profit_margin", "Profit margin"),
-                *_actual_target(f"{lob_id}.fin.nps", "NPS"),
             ]},
             {"type": "fields", "title": "Stakeholder View", "fields": [
                 _f(f"{lob_id}.stake.strategy", "Strategy View", "textarea"),
@@ -209,28 +208,6 @@ def _build_sections() -> List[Dict[str, Any]]:
             _f("cx.stake.strategy", "Strategy View", "textarea"),
             _f("cx.stake.epmo", "EPMO Feedback", "textarea"),
         ]},
-        {"type": "table", "title": "NPS by line of business", "id": "cx.nps_lob", "maxRows": 6, "columns": [
-            _col("lob", "Line of business"),
-            _col("actual", "Actual", "number"),
-            _col("target", "Target", "number"),
-            _col("gap", "Gap", "number", computed="actual-target"),
-        ]},
-        {"type": "table", "title": "NPS by segment — Health", "id": "cx.nps_seg.health", "maxRows": 8, "columns": [
-            _col("segment", "Segment"), _col("actual", "Actual", "number"), _col("target", "Target", "number"),
-            _col("gap", "Gap", "number", computed="actual-target"),
-        ]},
-        {"type": "table", "title": "NPS by segment — Motor", "id": "cx.nps_seg.motor", "maxRows": 8, "columns": [
-            _col("segment", "Segment"), _col("actual", "Actual", "number"), _col("target", "Target", "number"),
-            _col("gap", "Gap", "number", computed="actual-target"),
-        ]},
-        {"type": "table", "title": "NPS by segment — General", "id": "cx.nps_seg.general", "maxRows": 8, "columns": [
-            _col("segment", "Segment"), _col("actual", "Actual", "number"), _col("target", "Target", "number"),
-            _col("gap", "Gap", "number", computed="actual-target"),
-        ]},
-        {"type": "table", "title": "NPS by segment — Life", "id": "cx.nps_seg.life", "maxRows": 8, "columns": [
-            _col("segment", "Segment"), _col("actual", "Actual", "number"), _col("target", "Target", "number"),
-            _col("gap", "Gap", "number", computed="actual-target"),
-        ]},
     ]})
 
     # 10. Human Resources ---------------------------------------------------
@@ -341,7 +318,6 @@ DEFAULT_ROWS: Dict[str, List[Dict[str, Any]]] = {
     "ipi.sector": [{"sector": n} for n in ("Mobility/Motor", "General", "Life", "Health", "CX", "HR")],
     "ipi.benefit": [{"lob": n} for n in ("Health", "General", "Life", "Motor")],
     "scorecard.row": [{"lob": n} for n in ("Health", "Motor", "General", "Life", "Customer Experience", "Human Resources")],
-    "cx.nps_lob": [{"lob": n} for n in ("Companywide", "Health", "Mobility", "General", "Life")],
     "summary.commit": [{"item": n} for n in (
         "Committed growth BRI", "On track today", "Watch", "At Risk", "Savings BRI", "Govt assets")],
 }
