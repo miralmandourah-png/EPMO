@@ -61,7 +61,47 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 6 — Remove NPS entirely (this release)
+## Phase 7 — Blank NPS content from the exported PPTX (this release)
+
+Phase 6 removed NPS from the dashboard, but the exported deck still showed
+whatever NPS content was baked into the user's own template (since export
+only overwrites what the data model maps). User asked for the export itself
+to have NPS removed too. Chose (per the user's decision) to **blank values
+only** — clear NPS text/tables wherever they appear, but leave every slide,
+its layout, and page numbers exactly as-is; no slide deletion or
+renumbering.
+
+**Added to `pptx_export.py`**
+- Blanks the "NPS (sector)" row (label + actual + target-delta) on every
+  LoB's Financials block (Health incl. its duplicate slide, Motor, General,
+  Life).
+- Blanks the CX NPS-by-LoB slide (and its appendix duplicate): the 5-row
+  actual/target table, both NPS section headers, and the "Read:" note.
+  Surgically strips just the NPS clause from its headline via regex
+  (`"...strong execution (IPI 3.82), but NPS lags..."` → `"...strong
+  execution (IPI 3.82)"`) rather than blanking the whole headline, since the
+  rest of the sentence isn't NPS content.
+- Blanks the CX NPS-by-segment slide's headline/subheadline/headers/note,
+  and **removes the nested GROUP shape** holding the per-LoB segment tables
+  (that content lives inside a PowerPoint group, invisible to a flat
+  top-level shape scan -- found this while investigating why the slide's
+  text dump looked emptier than its visible content).
+- Found two more headlines that weave NPS into otherwise-unrelated sentences
+  (General's "best NPS, but execution is just below the line (IPI 2.82) and
+  GWP is 22% short"; Life's "execution and NPS lag (IPI 2.66)") plus their
+  subheadlines and one EPMO-feedback note. Used the same surgical-regex
+  approach so the non-NPS content (IPI, GWP, loss ratio, committed benefit)
+  survives -- full-sentence blanking would have thrown away real information
+  that happened to share a sentence with an NPS mention.
+
+**Verified**: scanned the full 36-slide exported deck case-insensitively for
+"nps" -- zero remaining mentions. Confirmed shape-count diff is exactly one
+slide (30, where the group was removed) and every other slide is untouched
+structurally. Re-ran the full existing test suite (constants extraction, IPI/
+Milestones import, recovery sync, LoB initiative export) on top of this to
+confirm no interference with anything shipped earlier.
+
+## Phase 6 — Remove NPS entirely
 
 Per user request. Removed from `schema.py`:
 - Each LoB's "May-26 YTD Financials" NPS actual/target field.

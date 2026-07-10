@@ -743,6 +743,103 @@ def _apply_hr(slide, fields: Dict[str, Any]) -> None:
             _set_box_text(box, str(comment))
 
 
+# --------------------------------------------------------------------------
+# NPS removal (blank values only -- slides, layout, and page numbers are
+# left exactly as-is; only NPS text/tables are cleared to empty).
+# --------------------------------------------------------------------------
+
+LOB_NPS_ROW_SLIDES = {"health": [8, 20], "motor": [22], "general": [24], "life": [26]}
+LOB_NPS_ROW_POS = [(0.620, 6.220), (2.100, 6.220), (4.880, 6.220)]  # label, actual, target-delta
+
+CX_NPS_SUMMARY_SLIDES = [11, 29]
+CX_NPS_SUMMARY_ROW_TS = [1.783, 2.073, 2.363, 2.653, 2.943]
+CX_NPS_SUMMARY_COLS = [0.620, 2.100, 4.880]
+
+CX_NPS_DETAIL_SLIDE = 30
+CX_NPS_DETAIL_BLANK_POS = [(0.620, 0.520), (0.620, 0.960), (0.620, 1.300), (9.400, 1.300), (0.620, 6.060)]
+
+
+def _blank_lob_nps_row(slide) -> None:
+    for L, T in LOB_NPS_ROW_POS:
+        box = _find_near(slide, L, T, tol=0.05)
+        if box:
+            _set_box_text(box, "")
+
+
+def _blank_cx_nps_summary(slide) -> None:
+    for sh in _text_boxes(slide):
+        t = sh.text_frame.text.strip()
+        if t.startswith("Customer Experience") and "NPS" in t:
+            stripped = re.sub(r",?\s*but NPS lags across most segments\s*$", "", t, flags=re.I).strip()
+            if stripped != t:
+                _set_box_text(sh, stripped)
+            break
+    for L, T in [(0.620, 1.168), (0.620, 1.517), (0.611, 3.550), (0.620, 6.995)]:
+        box = _find_near(slide, L, T, tol=0.1)
+        if box:
+            _set_box_text(box, "")
+    for row_t in CX_NPS_SUMMARY_ROW_TS:
+        for L in CX_NPS_SUMMARY_COLS:
+            box = _find_near(slide, L, row_t, tol=0.05)
+            if box:
+                _set_box_text(box, "")
+
+
+def _regex_blank(slide, l: float, t: float, pattern: str, replacement: str, tol: float = 0.05) -> None:
+    """Strip an NPS-mentioning clause from a box's text via regex, leaving
+    the rest of the sentence (headline/subheadline) intact. No-op if the
+    pattern doesn't match, so unrelated wording is never touched."""
+    box = _find_near(slide, l, t, tol=tol)
+    if not box:
+        return
+    text = box.text_frame.text.strip()
+    new_text = re.sub(pattern, replacement, text, flags=re.I).strip()
+    if new_text != text:
+        _set_box_text(box, new_text)
+
+
+def _blank_narrative_nps_mentions(prs) -> None:
+    """Headlines/subheadlines on the benefit-concentration and General/Life
+    deep-dive slides weave NPS into an otherwise non-NPS sentence -- surgical
+    removal of just the NPS clause, not a full blank, so real content (IPI,
+    GWP, committed benefit) survives."""
+    n = len(prs.slides)
+
+    for idx in (7, 19):  # benefit-concentration slide + its appendix duplicate
+        if idx > n:
+            continue
+        s = prs.slides[idx - 1]
+        box = _find_near(s, 0.620, 3.340, tol=0.05)
+        if box:
+            _set_two_paragraph(box, "General", "GWP short")
+        box = _find_near(s, 0.620, 4.070, tol=0.05)
+        if box:
+            _set_two_paragraph(box, "Life", "most profitable")
+
+    if 24 <= n:  # General deep-dive
+        s = prs.slides[23]
+        _regex_blank(s, 0.620, 0.520, r"best NPS,\s*but\s+", "")
+        _regex_blank(s, 0.620, 0.960, r"^Best customer score \(NPS\) of any book;\s*", "")
+        box = _find_near(s, 7.640, 4.550, tol=0.1)
+        if box:
+            _set_box_text(box, "")  # freeform EPMO note whose whole point is the NPS gap
+
+    if 26 <= n:  # Life deep-dive
+        s = prs.slides[25]
+        _regex_blank(s, 0.620, 0.520, r"execution and NPS lag\b", "execution lags")
+        _regex_blank(s, 0.620, 0.960, r"\s*and NPS is [\d.]+ points under target\.?$", ".")
+
+
+def _blank_cx_nps_detail(slide) -> None:
+    for L, T in CX_NPS_DETAIL_BLANK_POS:
+        box = _find_near(slide, L, T, tol=0.05)
+        if box:
+            _set_box_text(box, "")
+    for sh in list(slide.shapes):
+        if sh.shape_type == MSO_SHAPE_TYPE.GROUP:
+            sh._element.getparent().remove(sh._element)
+
+
 def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
     """Return a new .pptx (bytes) = template with mapped values substituted."""
     fields = state.get("fields", {})
@@ -785,6 +882,19 @@ def export_pptx(template_bytes: bytes, state: Dict[str, Any]) -> bytes:
             _apply_cx_projects(prs.slides[idx - 1], fields, rows)
     if HR_SLIDE <= n:
         _apply_hr(prs.slides[HR_SLIDE - 1], fields)
+
+    # NPS is out of scope for this platform -- blank it wherever it appears,
+    # regardless of what's in `fields` (slides/layout/page numbers untouched).
+    for lob_id, slides in LOB_NPS_ROW_SLIDES.items():
+        for idx in slides:
+            if idx <= n:
+                _blank_lob_nps_row(prs.slides[idx - 1])
+    for idx in CX_NPS_SUMMARY_SLIDES:
+        if idx <= n:
+            _blank_cx_nps_summary(prs.slides[idx - 1])
+    if CX_NPS_DETAIL_SLIDE <= n:
+        _blank_cx_nps_detail(prs.slides[CX_NPS_DETAIL_SLIDE - 1])
+    _blank_narrative_nps_mentions(prs)
 
     buf = io.BytesIO()
     prs.save(buf)
