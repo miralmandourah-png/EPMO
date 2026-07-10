@@ -61,7 +61,30 @@ real uploaded files, and the UI in a real headless-Chromium smoke test
 menus, reset modal). A CSS bug found by that test (an invisible modal overlay
 intercepting all clicks) was fixed.
 
-## Phase 7 — Blank NPS content from the exported PPTX (this release)
+## Phase 8 — Fix: "Initiative (group)" column empty on the Projects tables
+
+User-reported bug: the "Projects under each initiative" table's Initiative
+column was blank after extracting from the template.
+
+Root cause: the deck stores one shared ALL-CAPS header per initiative,
+covering several project rows underneath it -- not a value per row -- so
+the original extractor only ever read the project name and never touched
+the `initiative` column.
+
+**Fix**: added `LOB_PROJ_GROUP_SIZES` (how many consecutive project rows sit
+under each initiative's header, in the same order as that LoB's initiative
+table -- e.g. Health `[1,2,3,2,1,1]`, summing to its 10 project rows and
+lining up 1:1 with its 6 initiatives) and `_proj_row_initiative_index` to
+attribute each project row to an initiative index. The extractor now looks
+up that initiative's name (from the initiatives it just extracted) and
+writes it into each project row's `initiative` field.
+
+**Verified**: every project row across all four LoBs checked against the
+source deck -- correct initiative attribution in every case (e.g. Health's
+2 "SME acquisition" projects, 3 "Retail via Tree" projects), through both a
+direct extraction test and the full HTTP import round-trip.
+
+## Phase 7 — Blank NPS content from the exported PPTX
 
 Phase 6 removed NPS from the dashboard, but the exported deck still showed
 whatever NPS content was baked into the user's own template (since export

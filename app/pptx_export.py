@@ -550,6 +550,30 @@ LOB_PROJ_CONFIG = {
     "life": {"slides": [27], "row_ts": [1.863, 2.574, 3.284, 3.994, 4.704]},
 }
 
+# How many consecutive project rows sit under each initiative's group header,
+# in the same top-to-bottom order as that LoB's initiative table -- e.g.
+# Health's group sizes [1,2,3,2,1,1] sum to its 10 project rows and line up
+# 1:1 with its 6 initiatives (Corporate KAM=1 project, SME acquisition=2, ...).
+# Used to attribute each project row to an initiative name for the "Initiative
+# (group)" column, which the deck itself doesn't store per-project-row (one
+# shared ALL-CAPS header covers several rows).
+LOB_PROJ_GROUP_SIZES = {
+    "health": [1, 2, 3, 2, 1, 1],
+    "motor": [2, 2, 1, 1, 2],
+    "general": [1, 3, 1, 1, 1, 1, 1, 1],
+    "life": [1, 1, 1, 1, 1],
+}
+
+
+def _proj_row_initiative_index(lob_id: str, row_index: int) -> Optional[int]:
+    """Which initiative-table index (0-based) a project row belongs to."""
+    cursor = 0
+    for init_idx, size in enumerate(LOB_PROJ_GROUP_SIZES.get(lob_id, [])):
+        if row_index < cursor + size:
+            return init_idx
+        cursor += size
+    return None
+
 
 def _find_in_band(slide, row_t: float, l_min: float, l_max: float, tol_t: float = 0.15,
                     require_shape: bool = False):

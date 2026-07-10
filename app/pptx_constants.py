@@ -24,6 +24,7 @@ from .pptx_export import (
     _text_boxes, _left_top_in, _find_near, _find_in_band, _fmt_int, EXEC_POS,
     LOB_INIT_CONFIG, LOB_PROJ_CONFIG, INIT_COLS, NAME_COL_L, PROJ_NAME_L,
     CX_PROJ_SLIDES, CX_PROJ_ROW_TS, PROJ_IPI_L, PROJ_TI_L,
+    _proj_row_initiative_index,
 )
 
 EXEC_SUMMARY_SLIDE = 4
@@ -190,20 +191,27 @@ def _extract_lob_initiatives(prs) -> Dict[str, List[Dict[str, Any]]]:
     return out
 
 
-def _extract_lob_projects(prs) -> Dict[str, List[Dict[str, Any]]]:
-    """Project name is a constant identifier -- IPI/TI/comment are monthly."""
+def _extract_lob_projects(prs, initiatives: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Project name is a constant identifier -- IPI/TI/comment are monthly.
+    "initiative" (which group a project sits under) is also constant, and is
+    attributed via LOB_PROJ_GROUP_SIZES rather than read from the deck (the
+    deck stores one shared ALL-CAPS header per group, not a value per row)."""
     out: Dict[str, List[Dict[str, Any]]] = {}
     for lob_id, cfg in LOB_PROJ_CONFIG.items():
         slide_idx = cfg["slides"][0]
         if slide_idx > len(prs.slides):
             continue
         slide = prs.slides[slide_idx - 1]
+        lob_inits = initiatives.get(lob_id, [])
         entries = []
-        for row_t in cfg["row_ts"]:
+        for row_index, row_t in enumerate(cfg["row_ts"]):
             box = _find_near(slide, PROJ_NAME_L, row_t, tol=0.05)
             name = box.text_frame.text.strip() if box else ""
-            if name:
-                entries.append({"project": name})
+            if not name:
+                continue
+            init_idx = _proj_row_initiative_index(lob_id, row_index)
+            initiative_name = lob_inits[init_idx]["name"] if init_idx is not None and init_idx < len(lob_inits) else ""
+            entries.append({"initiative": initiative_name, "project": name})
         out[lob_id] = entries
     return out
 
@@ -252,9 +260,10 @@ def extract_constants(template_bytes: bytes) -> Dict[str, Any]:
         tables["ctx.gwp_year"] = _extract_gwp_years(s5)
         tables["ctx.gwp_lob"] = _extract_gwp_by_lob(s5)
 
-    for lob_id, entries in _extract_lob_initiatives(prs).items():
+    lob_initiatives = _extract_lob_initiatives(prs)
+    for lob_id, entries in lob_initiatives.items():
         tables[f"{lob_id}.init"] = entries
-    for lob_id, entries in _extract_lob_projects(prs).items():
+    for lob_id, entries in _extract_lob_projects(prs, lob_initiatives).items():
         tables[f"{lob_id}.proj"] = entries
     cx_entries = _extract_cx_projects(prs)
     if cx_entries:
